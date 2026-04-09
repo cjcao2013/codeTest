@@ -28,7 +28,8 @@ codeTest/
 │   └── src/
 │       ├── pages/
 │       │   ├── AssessPage.tsx
-│       │   └── MigratePage.tsx
+│       │   ├── MigratePage.tsx
+│       │   └── HistoryPage.tsx
 │       ├── components/
 │       │   ├── ConfigForm.tsx       # Input form for CLI args
 │       │   ├── LogViewer.tsx        # Real-time WebSocket log stream
@@ -42,7 +43,7 @@ codeTest/
     │   ├── migrate.py       # POST /api/migrate, WS /api/migrate/ws/{run_id}
     │   └── history.py       # GET /api/history, GET /api/history/{run_id}
     └── services/
-        └── runner.py        # asyncio subprocess management + log streaming
+        └── runner.py        # asyncio subprocess management + log streaming + line buffer
 ```
 
 ---
@@ -52,17 +53,20 @@ codeTest/
 ```
 User fills config form
     → POST /api/assess  (or /api/migrate)
-    → API creates run_id, starts subprocess (assess.py / migrate.py)
-    → Returns run_id to frontend
+    → API generates run_id (UUID4) before subprocess creation
+    → Starts subprocess, runner.py begins buffering all stdout lines in memory (keyed by run_id)
+    → Returns run_id to frontend immediately
 
 Frontend connects WebSocket /api/{type}/ws/{run_id}
-    → runner.py reads subprocess stdout line-by-line
-    → Each line pushed over WebSocket
+    → runner.py replays all buffered lines first (handles connect-before-ready race condition)
+    → Then switches to live streaming as new lines arrive
     → LogViewer scrolls in real time
+    → Buffer is retained until process exits plus 5 minutes, capped at 10,000 lines
 
 Subprocess exits
     → runner.py reads generated Markdown report
-    → Saves run record to history.json (run_id, type, status, timestamp, report_path)
+    → Saves run record to SQLite (run_id UUID4, type, status, started_at, ended_at, report_path)
+    → duration = wall-clock time from subprocess start to exit
     → WebSocket sends "DONE" or "ERROR" sentinel
 
 Frontend receives sentinel
@@ -86,13 +90,30 @@ Frontend receives sentinel
 
 | Area | Component | Description |
 |------|-----------|-------------|
-| Left panel | ConfigForm | `project_dir`, `.env` path, `--dry-run` toggle + Run button |
+| Left panel | ConfigForm | See Migrate flags below + Run button |
 | Right top | LogViewer | WebSocket real-time scrolling log |
 | Right bottom | ReportViewer | Rendered migration report |
 
+**Assess flags** (from `assess.py`):
+
+| Flag | Type | Default | UI Control |
+|------|------|---------|------------|
+| `--project-dir` | path | required | Text input (required) |
+| `--report-out` | path | `./tap-assessment-report.md` | Text input |
+| `--volume-threshold` | string | `small:500,medium:5000` | Text input |
+
+**Migrate flags** (from `migrate.py`):
+
+| Flag | Type | Default | UI Control |
+|------|------|---------|------------|
+| `--project-dir` | path | required | Text input (required) |
+| `--env` | path | `.env` | Text input |
+| `--dry-run` | bool | false | Toggle switch |
+| `--report-out` | path | `./tap-migration-report.md` | Text input |
+
 ### History Page
 
-- Table: timestamp / type (assess|migrate) / status (success|failed) / duration
+- Table: started_at / type (assess|migrate) / status (success|failed) / duration (wall-clock time from subprocess start to exit)
 - Click row → opens report in ReportViewer modal
 
 ---
@@ -107,7 +128,7 @@ Frontend receives sentinel
 | Real-time logs | WebSocket via native browser API | Best for streaming, no proxy issues on localhost |
 | Backend framework | FastAPI + uvicorn | Native async, WebSocket support, easy Python subprocess integration |
 | Subprocess management | asyncio.create_subprocess_exec | Non-blocking, line-by-line stdout capture |
-| History storage | Local JSON file | Sufficient for local demo; no database setup needed |
+| History storage | SQLite via `aiosqlite` | Zero-setup, handles concurrent writes safely (vs. JSON file) |
 
 ---
 
@@ -124,12 +145,52 @@ Frontend receives sentinel
 
 ---
 
+## Input Validation
+
+All path inputs (`project_dir`, `env`, `report_out`) must be validated before forwarding to the subprocess:
+- Resolve to an absolute path
+- Reject path traversal attempts (e.g., `../../etc/passwd`)
+- For required paths (`project_dir`): verify the path exists and is a directory
+- Validation happens in the FastAPI route handler before subprocess creation; return 422 on failure
+
+---
+
+## Concurrency
+
+For this local demo, **maximum 1 concurrent run** is enforced. If a run is already active, the API returns HTTP 409 with `{"detail": "A run is already in progress"}`. The frontend disables the Run button while any run is active.
+
+---
+
+## API Response Schemas
+
+**POST `/api/assess` and `/api/migrate`** — response:
+```json
+{ "run_id": "<uuid4>" }
+```
+
+**GET `/api/history/{run_id}`** — response:
+```json
+{
+  "run_id": "string",
+  "type": "assess | migrate",
+  "status": "running | success | failed",
+  "started_at": "ISO8601",
+  "ended_at": "ISO8601 | null",
+  "duration_seconds": "float | null",
+  "report": "Markdown string | null"
+}
+```
+
+**GET `/api/history`** — response: array of the above objects (without the `report` field).
+
+---
+
 ## Error Handling
 
 - Subprocess non-zero exit → send `{"type": "error", "message": "..."}` over WebSocket
-- Invalid config (missing required fields) → 422 from FastAPI before subprocess starts
-- WebSocket disconnect mid-run → subprocess continues; client can reconnect and replay buffered lines
-- Report file missing after run → return empty report with error status in history
+- Invalid config (missing/invalid fields) → 422 from FastAPI before subprocess starts
+- WebSocket disconnect mid-run → subprocess continues; client can reconnect and replay buffered lines (buffer retained for 5 minutes after **process exit**, capped at 10,000 lines)
+- Report file missing after run → return `report: null` with `status: failed` in history record
 
 ---
 
@@ -146,10 +207,12 @@ Frontend receives sentinel
 ```bash
 # Terminal 1 — API server
 cd api && uvicorn main:app --reload --port 8000
+# If 8000 is taken: uvicorn main:app --reload --port 8001
 
 # Terminal 2 — Frontend dev server
 cd frontend && npm run dev
 # Opens at http://localhost:5173
+# If 5173 is taken: npm run dev -- --port 5174
 ```
 
 ---
