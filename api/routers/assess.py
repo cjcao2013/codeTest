@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -10,6 +11,8 @@ from services.validator import validate_path, ValidationError
 router = APIRouter()
 
 TAP_MIGRATION_DIR = str(Path(__file__).parent.parent.parent / "tap-migration")
+
+_THRESHOLD_RE = re.compile(r'^[a-zA-Z]+:\d+(,[a-zA-Z]+:\d+)*$')
 
 
 class AssessRequest(BaseModel):
@@ -32,6 +35,9 @@ async def start_assess(req: AssessRequest, request: Request):
         report_out = validate_path(req.report_out)
     except ValidationError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+    if not _THRESHOLD_RE.match(req.volume_threshold):
+        raise HTTPException(status_code=422, detail="volume_threshold must be in format 'label:number' comma-separated")
 
     cmd = [
         "uv", "run", "python", "assess.py",
