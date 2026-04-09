@@ -45,3 +45,17 @@ async def test_assess_409_when_busy(client, tmp_path):
     await client.post("/api/assess", json={"project_dir": str(tmp_path)})
     resp = await client.post("/api/assess", json={"project_dir": str(tmp_path)})
     assert resp.status_code == 409
+
+
+async def test_migrate_missing_project_dir_returns_422(client):
+    resp = await client.post("/api/migrate", json={})
+    assert resp.status_code == 422
+
+
+async def test_migrate_valid_dry_run_returns_run_id(client, tmp_path):
+    resp = await client.post("/api/migrate", json={
+        "project_dir": str(tmp_path),
+        "dry_run": True,
+    })
+    assert resp.status_code == 200
+    assert "run_id" in resp.json()
