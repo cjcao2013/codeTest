@@ -3,3 +3,4 @@ tap-migration/__pycache__/
 tap-migration/src/__pycache__/
 tap-migration/tests/__pycache__/
 tap-migration/.venv/
+**/.DS_Store
