@@ -59,3 +59,23 @@ async def test_migrate_valid_dry_run_returns_run_id(client, tmp_path):
     })
     assert resp.status_code == 200
     assert "run_id" in resp.json()
+
+
+async def test_history_empty_returns_list(client):
+    resp = await client.get("/api/history")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+async def test_history_run_id_not_found_returns_404(client):
+    resp = await client.get("/api/history/nonexistent-id")
+    assert resp.status_code == 404
+
+
+async def test_history_contains_run_after_assess(client, tmp_path):
+    import asyncio
+    post = await client.post("/api/assess", json={"project_dir": str(tmp_path)})
+    run_id = post.json()["run_id"]
+    await asyncio.sleep(0.1)
+    runs = (await client.get("/api/history")).json()
+    assert any(r["run_id"] == run_id for r in runs)
