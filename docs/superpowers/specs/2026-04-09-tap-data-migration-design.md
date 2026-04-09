@@ -99,9 +99,40 @@ Project: [name] | Date: [YYYY-MM-DD]
 | 🟡 Pending | Some items need TAP team confirmation | Resolve open questions first |
 | 🔴 No-go | Blockers identified | Provide remediation guidance |
 
+**Scoring rubric:**
+- Any dimension marked ❌ → **No-go**
+- Two or more dimensions marked ⚠️ with no ❌ → **Pending**
+- All dimensions ✅, or at most one ⚠️ → **Go**
+
+**Volume thresholds:**
+- Small (✅): < 500 records / files
+- Medium (⚠️): 500 – 5,000 records / files
+- Large (🔴): > 5,000 records / files
+
 ---
 
 ## Phase 2: Execution
+
+### CLI Interface
+
+The skill generates a project with two subcommands:
+
+```bash
+# Phase 1 only — run assessment, output feasibility report
+uv run assess.py --project-dir ./my-tests
+
+# Full migration — assess + convert + upload + validate + report
+uv run migrate.py --project-dir ./my-tests --env .env
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--project-dir` | Yes | Path to the local test project |
+| `--env` | No (migrate only) | Path to `.env` file (default: `.env`) |
+| `--dry-run` | No | Run conversion only, skip upload |
+| `--report-out` | No | Output path for migration report (default: `./tap-migration-report.md`) |
+
+---
 
 ### Generated Script Structure
 
@@ -121,19 +152,67 @@ tap-migration/
 ### Execution Flow
 
 ```
-python migrate.py
+uv run migrate.py --project-dir ./my-tests
   │
-  ├── 1. Read local test data/cases
+  ├── 1. Read local test data/cases from --project-dir
   ├── 2. Convert formats (converter.py)
+  │       └── Output: TAP-compatible payload (see Payload Schema)
   ├── 3. Upload to TAP (uploader.py)
-  │       └── POST [TAP_API_BASE_URL]/test-data    ← TBD
+  │       └── POST [TAP_API_BASE_URL]/test-data    ← TBD (fill TAP_API_BASE_URL in .env)
   │           POST [TAP_API_BASE_URL]/test-cases   ← TBD
-  │           Auth: Bearer [TAP_API_TOKEN]         ← TBD
+  │           Auth: Bearer $TAP_API_TOKEN          ← TBD (fill in .env)
   ├── 4. Validate (validator.py)
   │       └── Compare: local count vs TAP uploaded count
-  │           Content spot-check (sample)
+  │           Spot-check: random 10% sample (min 5 records),
+  │           comparing id, name, and one payload field
   └── 5. Generate report (reporter.py)
 ```
+
+### Environment Variables (`.env.example`)
+
+```
+TAP_API_BASE_URL=https://tap.example.com/api   # TBD — fill with TAP team
+TAP_API_TOKEN=your-token-here                   # TBD — fill with TAP team
+TAP_PROJECT_ID=your-project-id                  # TBD — fill with TAP team
+```
+
+### TAP Payload Schema (Placeholder)
+
+Converter output must conform to these structures (fill in with TAP team):
+
+**Test data upload payload:**
+```json
+{
+  "id": "TBD",
+  "name": "TBD",
+  "data": {}
+}
+```
+
+**Test case upload payload:**
+```json
+{
+  "id": "TBD",
+  "name": "TBD",
+  "steps": []
+}
+```
+
+---
+
+### Error Handling Policy
+
+| Scenario | Behavior |
+|----------|----------|
+| Single record conversion fails | Log error, continue to next record (continue-on-error) |
+| Single record upload fails | Log error with record ID, continue to next record |
+| Auth failure (401/403) | Abort immediately, report auth error |
+| Network timeout | Retry up to 3 times with exponential backoff, then log as failed |
+| All records fail | Abort after batch, surface as No-go in report |
+
+Failed records are collected and included in the migration report's Failure Details section.
+
+---
 
 ### TAP API Placeholders
 
@@ -175,7 +254,7 @@ Project: [name] | Date: [YYYY-MM-DD] | Executed by: [user]
 | Dependency management | `pyproject.toml` via uv |
 | API calls | `httpx` (async-capable) |
 | Config/secrets | `.env` file via `python-dotenv` |
-| CLI interface | `argparse` or `typer` |
+| CLI interface | `typer` |
 
 ---
 
