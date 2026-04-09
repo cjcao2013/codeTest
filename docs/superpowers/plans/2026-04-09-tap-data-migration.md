@@ -193,6 +193,30 @@ def test_unknown_test_data_when_empty(tmp_path):
     result = scan_project(tmp_path)
     assert result.test_data_format is None
     assert result.test_data_count == 0
+
+
+def test_test_data_paths_populated(tmp_path):
+    data_dir = tmp_path / "test_data"
+    data_dir.mkdir()
+    csv_file = data_dir / "records.csv"
+    csv_file.write_text("id,name\n1,foo\n")
+    result = scan_project(tmp_path)
+    assert csv_file in result.test_data_paths
+
+
+def test_test_case_paths_populated(tmp_path):
+    test_file = tmp_path / "test_login.py"
+    test_file.write_text("def test_valid(): pass\n")
+    result = scan_project(tmp_path)
+    assert test_file in result.test_case_paths
+
+
+def test_detects_nested_test_data(tmp_path):
+    nested = tmp_path / "data" / "sub"
+    nested.mkdir(parents=True)
+    (nested / "nested.csv").write_text("id,name\n1,x\n")
+    result = scan_project(tmp_path)
+    assert result.test_data_count >= 1
 ```
 
 - [ ] **Step 2: Run tests — expect FAIL**
@@ -275,7 +299,7 @@ def _detect_test_data(root: Path, result: ScanResult) -> None:
     counts: dict[str, int] = {}
     paths: list[Path] = []
     for search_root in search_roots:
-        for f in search_root.iterdir():
+        for f in search_root.rglob("*"):
             if f.is_file() and f.suffix in _DATA_EXTENSIONS:
                 fmt = _DATA_EXTENSIONS[f.suffix]
                 counts[fmt] = counts.get(fmt, 0) + 1
@@ -805,7 +829,7 @@ def test_feasibility_report_nogo_on_error():
         risk_items=["Format not supported"],
         pending_items=[],
     )
-    assert "No-go" in report or "❌" in report
+    assert "Not recommended" in report
 
 
 def test_migration_report_contains_summary():
@@ -996,7 +1020,7 @@ def _volume_status(count: int, small: int, medium: int) -> DimensionStatus:
 def main(
     project_dir: Path = typer.Option(..., help="Path to the local test project"),
     report_out: Path = typer.Option(Path("./tap-assessment-report.md"), help="Output path for report"),
-    volume_threshold: str = typer.Option("500,5000", help="Volume thresholds as small:N,medium:N"),
+    volume_threshold: str = typer.Option("small:500,medium:5000", help="Volume thresholds as small:N,medium:N"),
 ) -> None:
     small_threshold, medium_threshold = _parse_volume_threshold(volume_threshold)
     scan = scan_project(project_dir)
@@ -1069,7 +1093,46 @@ if __name__ == "__main__":
     app()
 ```
 
-- [ ] **Step 2: Smoke test**
+- [ ] **Step 2: Write unit tests for helper functions**
+
+Add `tap-migration/tests/test_assess.py`:
+
+```python
+from assess import _parse_volume_threshold, _volume_status
+from src.reporter import DimensionStatus
+
+
+def test_parse_volume_threshold_default():
+    small, medium = _parse_volume_threshold("small:500,medium:5000")
+    assert small == 500
+    assert medium == 5000
+
+
+def test_parse_volume_threshold_custom():
+    small, medium = _parse_volume_threshold("small:100,medium:1000")
+    assert small == 100
+    assert medium == 1000
+
+
+def test_volume_status_small():
+    assert _volume_status(100, 500, 5000) == DimensionStatus.OK
+
+
+def test_volume_status_medium():
+    assert _volume_status(1000, 500, 5000) == DimensionStatus.WARN
+
+
+def test_volume_status_large():
+    assert _volume_status(10000, 500, 5000) == DimensionStatus.ERROR
+```
+
+- [ ] **Step 3: Run tests — expect PASS**
+
+```bash
+cd tap-migration && uv run pytest tests/test_assess.py -v
+```
+
+- [ ] **Step 4: Smoke test**
 
 ```bash
 cd tap-migration && uv run assess.py --project-dir . --report-out /tmp/test-report.md
@@ -1077,10 +1140,10 @@ cd tap-migration && uv run assess.py --project-dir . --report-out /tmp/test-repo
 
 Expected: Report written to `/tmp/test-report.md`, content printed to terminal.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add tap-migration/assess.py
+git add tap-migration/assess.py tap-migration/tests/test_assess.py
 git commit -m "feat: add assess.py Phase 1 CLI — scan-first with prompt fallback"
 ```
 
@@ -1165,13 +1228,13 @@ def main(
         typer.echo(f"ERROR: Authentication failed — {e}", err=True)
         raise typer.Exit(1)
 
-    # Validate
+    # Validate — TAP API returns no payload, so we do a count-only check:
+    # slice local records to the number successfully uploaded to simulate what TAP received.
     combined_local = all_data_records + all_case_records
-    combined_remote = (
-        [{"id": r.get("id"), "name": r.get("name"), "data": r} for r in range(data_result.uploaded)] +
-        [{"id": r.get("id"), "name": r.get("name"), "steps": []} for r in range(case_result.uploaded)]
+    validation = validate_migration(
+        local_records=combined_local,
+        uploaded_records=combined_local[:data_result.uploaded + case_result.uploaded],
     )
-    validation = validate_migration(combined_local, combined_local[:data_result.uploaded + case_result.uploaded])
 
     # Report
     report = render_migration_report(
@@ -1189,7 +1252,61 @@ if __name__ == "__main__":
     app()
 ```
 
-- [ ] **Step 2: Smoke test with dry-run**
+- [ ] **Step 2: Write unit tests for CLI branching**
+
+Add `tap-migration/tests/test_migrate.py`:
+
+```python
+import pytest
+import respx
+import httpx
+from pathlib import Path
+from typer.testing import CliRunner
+from migrate import app
+
+runner = CliRunner()
+
+
+def test_dry_run_skips_upload(tmp_path):
+    (tmp_path / "test_foo.py").write_text("def test_a(): pass\n")
+    result = runner.invoke(app, ["--project-dir", str(tmp_path), "--dry-run"])
+    assert result.exit_code == 0
+    assert "Dry-run" in result.output
+
+
+def test_aborts_without_env_credentials(tmp_path):
+    result = runner.invoke(app, ["--project-dir", str(tmp_path)])
+    assert result.exit_code != 0
+    assert "TAP_API_BASE_URL" in result.output or "TAP_API_TOKEN" in result.output
+
+
+@respx.mock
+def test_full_run_writes_report(tmp_path):
+    (tmp_path / "test_foo.py").write_text("def test_a(): pass\n")
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "TAP_API_BASE_URL=https://tap.test/api\nTAP_API_TOKEN=tok\nTAP_PROJECT_ID=p1\n"
+    )
+    respx.post("https://tap.test/api/test-cases").mock(return_value=httpx.Response(200))
+    respx.post("https://tap.test/api/test-data").mock(return_value=httpx.Response(200))
+
+    report_path = tmp_path / "report.md"
+    result = runner.invoke(app, [
+        "--project-dir", str(tmp_path),
+        "--env", str(env_file),
+        "--report-out", str(report_path),
+    ])
+    assert result.exit_code == 0
+    assert report_path.exists()
+```
+
+- [ ] **Step 3: Run tests — expect PASS**
+
+```bash
+cd tap-migration && uv run pytest tests/test_migrate.py -v
+```
+
+- [ ] **Step 4: Smoke test with dry-run**
 
 ```bash
 cd tap-migration && uv run migrate.py --project-dir . --dry-run
@@ -1197,10 +1314,10 @@ cd tap-migration && uv run migrate.py --project-dir . --dry-run
 
 Expected: "Dry-run mode — skipping upload."
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add tap-migration/migrate.py
+git add tap-migration/migrate.py tap-migration/tests/test_migrate.py
 git commit -m "feat: add migrate.py Phase 2 CLI — convert/upload/validate/report pipeline"
 ```
 
@@ -1340,7 +1457,18 @@ The migration scripts live in `tap-migration/` within this repo. Deploy them to 
 
 - [ ] **Step 2: Create `.github/instructions/tap-data-migration.instructions.md`**
 
-Mirror the SKILL.md content into the Copilot instructions format (same content, same structure).
+```bash
+cp ~/.claude/skills/tap-data-migration/SKILL.md \
+   .github/instructions/tap-data-migration.instructions.md
+```
+
+Then add the frontmatter at the top of the copied file:
+
+```markdown
+---
+applyTo: "**/*migration*,**/*tap*,**/assess*,**/migrate*"
+---
+```
 
 - [ ] **Step 3: Update `.github/copilot-instructions.md`**
 
@@ -1357,7 +1485,7 @@ git commit -m "docs: add tap-data-migration skill documents for Claude Code and 
 
 ## Done Criteria
 
-- [ ] All tests pass (`uv run pytest --cov=src` ≥ 80% coverage)
+- [ ] All tests pass (`uv run pytest --cov=src --cov=assess --cov=migrate` ≥ 80% combined coverage)
 - [ ] `uv run assess.py --project-dir . ` runs without errors
 - [ ] `uv run migrate.py --project-dir . --dry-run` runs without errors
 - [ ] `~/.claude/skills/tap-data-migration/SKILL.md` exists
