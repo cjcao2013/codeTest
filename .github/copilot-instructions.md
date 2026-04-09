@@ -26,3 +26,5 @@ The migration follows a two-step model:
 **Prerequisite:** The project must already have automated tests managed by a CI/CD pipeline. If not, do not proceed — address the missing prerequisite first.
 
 Do not skip phases, jump to recommendations, or start Step 2 before Step 1 is complete and stable.
+
+For test data and test case migration to TAP, follow `.github/instructions/tap-data-migration.instructions.md`.
