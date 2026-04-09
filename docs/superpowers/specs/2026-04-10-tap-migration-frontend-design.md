@@ -82,17 +82,9 @@ Frontend receives sentinel
 
 | Area | Component | Description |
 |------|-----------|-------------|
-| Left panel | ConfigForm | `project_dir` path input + Run button |
+| Left panel | ConfigForm | See Assess flags below + Run button |
 | Right top | LogViewer | WebSocket real-time scrolling log |
 | Right bottom | ReportViewer | Rendered feasibility report |
-
-### Migrate Page
-
-| Area | Component | Description |
-|------|-----------|-------------|
-| Left panel | ConfigForm | See Migrate flags below + Run button |
-| Right top | LogViewer | WebSocket real-time scrolling log |
-| Right bottom | ReportViewer | Rendered migration report |
 
 **Assess flags** (from `assess.py`):
 
@@ -101,6 +93,14 @@ Frontend receives sentinel
 | `--project-dir` | path | required | Text input (required) |
 | `--report-out` | path | `./tap-assessment-report.md` | Text input |
 | `--volume-threshold` | string | `small:500,medium:5000` | Text input |
+
+### Migrate Page
+
+| Area | Component | Description |
+|------|-----------|-------------|
+| Left panel | ConfigForm | See Migrate flags below + Run button |
+| Right top | LogViewer | WebSocket real-time scrolling log |
+| Right bottom | ReportViewer | Rendered migration report |
 
 **Migrate flags** (from `migrate.py`):
 
@@ -214,6 +214,10 @@ cd frontend && npm run dev
 # Opens at http://localhost:5173
 # If 5173 is taken: npm run dev -- --port 5174
 ```
+
+**CORS:** `api/main.py` must allow origin `http://localhost:5173` (and `http://localhost:5174` as fallback).
+
+**Frontend API base URL:** Hardcode `VITE_API_BASE_URL=http://localhost:8000` in `frontend/.env.local`. The frontend reads this via `import.meta.env.VITE_API_BASE_URL`.
 
 ---
 
