@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-04-10-tap-migration-frontend-design.md`
 
+**Import root convention:** All `api/` Python files use bare module imports (`from services.db import ...`, `from routers import ...`). The working directory for all `api/` commands is `api/`. `pyproject.toml` sets `pythonpath = ["."]` so pytest resolves modules from `api/`.
+
 ---
 
 ## File Map
@@ -19,31 +21,33 @@
 | File | Responsibility |
 |------|---------------|
 | `api/pyproject.toml` | Python project config + deps |
-| `api/main.py` | FastAPI app entry, CORS (`http://localhost:5173`, `5174`), router registration |
+| `api/main.py` | FastAPI app entry, CORS, router registration, DB lifespan |
 | `api/routers/assess.py` | `POST /api/assess`, `WS /api/assess/ws/{run_id}` |
 | `api/routers/migrate.py` | `POST /api/migrate`, `WS /api/migrate/ws/{run_id}` |
 | `api/routers/history.py` | `GET /api/history`, `GET /api/history/{run_id}` |
 | `api/services/db.py` | SQLite init + CRUD (`aiosqlite`) |
-| `api/services/runner.py` | Subprocess launch, stdout buffer, asyncio.Queue streaming, concurrency lock |
+| `api/services/runner.py` | Subprocess launch, stdout buffer, asyncio.Queue streaming, concurrency lock, `on_complete` callback |
 | `api/services/validator.py` | Path input validation (resolve, traversal check, existence check) |
+| `api/tests/test_db.py` | Unit tests for db service |
 | `api/tests/test_validator.py` | Unit tests for validator |
 | `api/tests/test_runner.py` | Unit tests for runner with mock script |
 | `api/tests/test_routes.py` | Integration tests for all HTTP + WS routes |
+| `api/tests/fixtures/echo_script.py` | Mock subprocess script for runner tests |
 
 ### Frontend (`frontend/`)
 
 | File | Responsibility |
 |------|---------------|
-| `frontend/src/lib/types.ts` | Shared TypeScript types (`RunRecord`, `RunDetail`, `AssessConfig`, `MigrateConfig`) |
-| `frontend/src/lib/api.ts` | API client (`startAssess`, `startMigrate`, `fetchHistory`, `fetchRun`) |
-| `frontend/src/components/LogViewer.tsx` | Scrolling log display; accepts `string[]` lines prop |
-| `frontend/src/components/ReportViewer.tsx` | Renders Markdown string via react-markdown |
-| `frontend/src/components/ConfigForm.tsx` | Generic form; accepts field definitions + onSubmit |
-| `frontend/src/components/HistoryList.tsx` | Table of past runs; click row to view report |
-| `frontend/src/pages/AssessPage.tsx` | Wires ConfigForm + WebSocket + LogViewer + ReportViewer for assess flow |
-| `frontend/src/pages/MigratePage.tsx` | Same for migrate flow |
-| `frontend/src/pages/HistoryPage.tsx` | Renders HistoryList, opens ReportViewer modal on row click |
-| `frontend/src/App.tsx` | React Router setup + top nav |
+| `frontend/src/lib/types.ts` | Shared TypeScript types |
+| `frontend/src/lib/api.ts` | API client functions |
+| `frontend/src/components/LogViewer.tsx` | Scrolling log display |
+| `frontend/src/components/ReportViewer.tsx` | Markdown renderer |
+| `frontend/src/components/ConfigForm.tsx` | Generic config form |
+| `frontend/src/components/HistoryList.tsx` | Run history table |
+| `frontend/src/pages/AssessPage.tsx` | Assess flow page |
+| `frontend/src/pages/MigratePage.tsx` | Migrate flow page |
+| `frontend/src/pages/HistoryPage.tsx` | History page with report modal |
+| `frontend/src/App.tsx` | React Router + nav |
 
 ---
 
@@ -52,6 +56,7 @@
 **Files:**
 - Create: `api/pyproject.toml`
 - Create: `api/main.py`
+- Create: `api/routers/__init__.py`, `api/services/__init__.py`, `api/tests/__init__.py`, `api/tests/fixtures/__init__.py`
 
 - [ ] **Step 1: Create `api/pyproject.toml`**
 
@@ -74,19 +79,37 @@ dev = [
     "anyio[trio]>=4.0",
 ]
 
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+pythonpath = ["."]
 ```
 
 - [ ] **Step 2: Create `api/main.py`**
 
 ```python
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.routers import assess, migrate, history
+from routers import assess, migrate, history
+from services.db import init_db
 
-app = FastAPI(title="TAP Migration API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.db = await init_db()
+    yield
+    await app.state.db.close()
+
+
+app = FastAPI(title="TAP Migration API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,11 +123,12 @@ app.include_router(migrate.router, prefix="/api")
 app.include_router(history.router, prefix="/api")
 ```
 
-- [ ] **Step 3: Create empty `api/routers/__init__.py`, `api/services/__init__.py`, `api/tests/__init__.py`**
+- [ ] **Step 3: Create package directories**
 
 ```bash
-mkdir -p api/routers api/services api/tests
-touch api/routers/__init__.py api/services/__init__.py api/tests/__init__.py
+cd /Users/cj/code/codeTest
+mkdir -p api/routers api/services api/tests/fixtures
+touch api/routers/__init__.py api/services/__init__.py api/tests/__init__.py api/tests/fixtures/__init__.py
 ```
 
 - [ ] **Step 4: Install dependencies**
@@ -133,14 +157,15 @@ git commit -m "chore: scaffold FastAPI backend for TAP migration demo"
 ```python
 # api/tests/test_db.py
 import pytest
-from api.services.db import init_db, insert_run, get_run, list_runs
+from services.db import init_db, insert_run, update_run, get_run, list_runs
+
 
 @pytest.fixture
 async def db(tmp_path):
-    db_path = str(tmp_path / "test.db")
-    conn = await init_db(db_path)
+    conn = await init_db(str(tmp_path / "test.db"))
     yield conn
     await conn.close()
+
 
 async def test_insert_and_get_run(db):
     await insert_run(db, run_id="abc", run_type="assess", started_at="2026-01-01T00:00:00Z")
@@ -150,17 +175,19 @@ async def test_insert_and_get_run(db):
     assert run["status"] == "running"
     assert run["ended_at"] is None
 
+
 async def test_list_runs_empty(db):
     runs = await list_runs(db)
     assert runs == []
+
 
 async def test_list_runs_returns_inserted(db):
     await insert_run(db, run_id="abc", run_type="assess", started_at="2026-01-01T00:00:00Z")
     runs = await list_runs(db)
     assert len(runs) == 1
 
+
 async def test_update_run_status(db):
-    from api.services.db import update_run
     await insert_run(db, run_id="abc", run_type="assess", started_at="2026-01-01T00:00:00Z")
     await update_run(db, run_id="abc", status="success", ended_at="2026-01-01T00:01:00Z",
                      duration_seconds=60.0, report_path="/tmp/report.md")
@@ -175,7 +202,7 @@ async def test_update_run_status(db):
 cd api && uv run pytest tests/test_db.py -v
 ```
 
-Expected: `ImportError` or `ModuleNotFoundError`
+Expected: `ImportError`
 
 - [ ] **Step 3: Implement `api/services/db.py`**
 
@@ -196,12 +223,14 @@ CREATE TABLE IF NOT EXISTS runs (
 )
 """
 
+
 async def init_db(path: str = "tap_runs.db") -> aiosqlite.Connection:
     conn = await aiosqlite.connect(path)
     conn.row_factory = aiosqlite.Row
     await conn.execute(_CREATE_TABLE)
     await conn.commit()
     return conn
+
 
 async def insert_run(conn: aiosqlite.Connection, *, run_id: str, run_type: str, started_at: str) -> None:
     await conn.execute(
@@ -210,13 +239,14 @@ async def insert_run(conn: aiosqlite.Connection, *, run_id: str, run_type: str, 
     )
     await conn.commit()
 
+
 async def update_run(
     conn: aiosqlite.Connection,
     *,
     run_id: str,
     status: str,
     ended_at: str,
-    duration_seconds: float,
+    duration_seconds: float | None,
     report_path: str | None,
 ) -> None:
     await conn.execute(
@@ -225,13 +255,17 @@ async def update_run(
     )
     await conn.commit()
 
+
 async def get_run(conn: aiosqlite.Connection, run_id: str) -> dict[str, Any] | None:
     async with conn.execute("SELECT * FROM runs WHERE run_id=?", (run_id,)) as cur:
         row = await cur.fetchone()
         return dict(row) if row else None
 
+
 async def list_runs(conn: aiosqlite.Connection) -> list[dict[str, Any]]:
-    async with conn.execute("SELECT run_id, type, status, started_at, ended_at, duration_seconds FROM runs ORDER BY started_at DESC") as cur:
+    async with conn.execute(
+        "SELECT run_id, type, status, started_at, ended_at, duration_seconds FROM runs ORDER BY started_at DESC"
+    ) as cur:
         rows = await cur.fetchall()
         return [dict(r) for r in rows]
 ```
@@ -265,19 +299,23 @@ git commit -m "feat: add SQLite db service for run history"
 # api/tests/test_validator.py
 import pytest
 from pathlib import Path
-from api.services.validator import validate_path, ValidationError
+from services.validator import validate_path, ValidationError
+
 
 def test_valid_existing_dir(tmp_path):
     result = validate_path(str(tmp_path), must_exist=True, must_be_dir=True)
     assert result == tmp_path.resolve()
 
+
 def test_rejects_traversal():
     with pytest.raises(ValidationError, match="traversal"):
         validate_path("../../etc/passwd")
 
+
 def test_rejects_missing_when_must_exist(tmp_path):
     with pytest.raises(ValidationError, match="does not exist"):
         validate_path(str(tmp_path / "missing"), must_exist=True)
+
 
 def test_rejects_file_when_must_be_dir(tmp_path):
     f = tmp_path / "file.txt"
@@ -285,9 +323,9 @@ def test_rejects_file_when_must_be_dir(tmp_path):
     with pytest.raises(ValidationError, match="not a directory"):
         validate_path(str(f), must_be_dir=True)
 
+
 def test_optional_path_none_returns_none():
-    result = validate_path(None)
-    assert result is None
+    assert validate_path(None) is None
 ```
 
 - [ ] **Step 2: Run tests — expect FAIL**
@@ -302,8 +340,10 @@ cd api && uv run pytest tests/test_validator.py -v
 from __future__ import annotations
 from pathlib import Path
 
+
 class ValidationError(ValueError):
     pass
+
 
 def validate_path(
     value: str | None,
@@ -313,11 +353,9 @@ def validate_path(
 ) -> Path | None:
     if value is None:
         return None
-    resolved = Path(value).resolve()
-    # Reject traversal: resolved path must not escape via ".."
-    # (resolve() already normalises, but we check the original string)
     if ".." in Path(value).parts:
         raise ValidationError(f"Path traversal not allowed: {value!r}")
+    resolved = Path(value).resolve()
     if must_exist and not resolved.exists():
         raise ValidationError(f"Path does not exist: {resolved}")
     if must_be_dir and resolved.exists() and not resolved.is_dir():
@@ -344,14 +382,13 @@ git commit -m "feat: add path input validator"
 
 **Files:**
 - Create: `api/services/runner.py`
+- Create: `api/tests/fixtures/echo_script.py`
 - Create: `api/tests/test_runner.py`
-- Create: `api/tests/fixtures/echo_script.py` (mock subprocess script)
 
-- [ ] **Step 1: Create mock script for tests**
+- [ ] **Step 1: Create mock subprocess script**
 
 ```python
 # api/tests/fixtures/echo_script.py
-# A script that prints 3 lines and exits 0
 import sys
 print("line one")
 print("line two")
@@ -366,56 +403,67 @@ sys.exit(int(sys.argv[1]) if len(sys.argv) > 1 else 0)
 import asyncio
 import pytest
 from pathlib import Path
-from api.services.runner import RunnerService, RunnerError
+from services.runner import RunnerService, RunnerError
 
-FIXTURE_SCRIPT = Path(__file__).parent / "fixtures" / "echo_script.py"
+FIXTURE_SCRIPT = str(Path(__file__).parent / "fixtures" / "echo_script.py")
+
 
 @pytest.fixture
 def runner():
     svc = RunnerService()
     yield svc
-    # cleanup
     svc._runs.clear()
     svc._active_run_id = None
 
+
 async def test_start_run_returns_run_id(runner):
-    run_id = await runner.start(["python", str(FIXTURE_SCRIPT)])
+    run_id = await runner.start(["python", FIXTURE_SCRIPT])
     assert run_id is not None
-    # wait for finish
     await asyncio.sleep(0.5)
+
 
 async def test_buffer_contains_output(runner):
-    run_id = await runner.start(["python", str(FIXTURE_SCRIPT)])
+    run_id = await runner.start(["python", FIXTURE_SCRIPT])
     await asyncio.sleep(0.5)
     state = runner.get_state(run_id)
-    assert "line one\n" in state.buffer or "line one" in state.buffer[0]
+    assert any("line one" in line for line in state.buffer)
+
 
 async def test_done_flag_set_after_exit(runner):
-    run_id = await runner.start(["python", str(FIXTURE_SCRIPT)])
+    run_id = await runner.start(["python", FIXTURE_SCRIPT])
     await asyncio.sleep(0.5)
-    state = runner.get_state(run_id)
-    assert state.done is True
+    assert runner.get_state(run_id).done is True
+
 
 async def test_exit_code_zero_on_success(runner):
-    run_id = await runner.start(["python", str(FIXTURE_SCRIPT)])
+    run_id = await runner.start(["python", FIXTURE_SCRIPT])
     await asyncio.sleep(0.5)
-    state = runner.get_state(run_id)
-    assert state.exit_code == 0
+    assert runner.get_state(run_id).exit_code == 0
+
 
 async def test_exit_code_nonzero_on_failure(runner):
-    run_id = await runner.start(["python", str(FIXTURE_SCRIPT), "1"])
+    run_id = await runner.start(["python", FIXTURE_SCRIPT, "1"])
     await asyncio.sleep(0.5)
-    state = runner.get_state(run_id)
-    assert state.exit_code == 1
+    assert runner.get_state(run_id).exit_code == 1
+
 
 async def test_concurrency_rejected_when_busy(runner):
-    run_id = await runner.start(["python", str(FIXTURE_SCRIPT)])
+    await runner.start(["python", FIXTURE_SCRIPT])
     with pytest.raises(RunnerError, match="already in progress"):
-        await runner.start(["python", str(FIXTURE_SCRIPT)])
+        await runner.start(["python", FIXTURE_SCRIPT])
     await asyncio.sleep(0.5)
 
-async def test_get_state_unknown_run_id(runner):
-    assert runner.get_state("nonexistent") is None
+
+async def test_on_complete_callback_called(runner):
+    called_with = []
+
+    async def cb(run_id, state):
+        called_with.append((run_id, state.exit_code))
+
+    run_id = await runner.start(["python", FIXTURE_SCRIPT], on_complete=cb)
+    await asyncio.sleep(0.5)
+    assert len(called_with) == 1
+    assert called_with[0] == (run_id, 0)
 ```
 
 - [ ] **Step 3: Run tests — expect FAIL**
@@ -432,22 +480,29 @@ import asyncio
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Callable, Coroutine, Optional
 
 _MAX_BUFFER = 10_000
+
 
 class RunnerError(Exception):
     pass
 
+
 @dataclass
 class RunState:
     run_id: str
+    run_type: str = "unknown"
     buffer: list[str] = field(default_factory=list)
     queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     done: bool = False
     exit_code: Optional[int] = None
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     ended_at: Optional[datetime] = None
+
+
+OnComplete = Callable[[str, RunState], Coroutine[Any, Any, None]]
+
 
 class RunnerService:
     def __init__(self) -> None:
@@ -461,11 +516,17 @@ class RunnerService:
     def is_busy(self) -> bool:
         return self._active_run_id is not None
 
-    async def start(self, cmd: list[str], cwd: Optional[str] = None) -> str:
+    async def start(
+        self,
+        cmd: list[str],
+        cwd: Optional[str] = None,
+        run_type: str = "unknown",
+        on_complete: Optional[OnComplete] = None,
+    ) -> str:
         if self.is_busy:
             raise RunnerError("A run is already in progress")
         run_id = str(uuid.uuid4())
-        state = RunState(run_id=run_id)
+        state = RunState(run_id=run_id, run_type=run_type)
         self._runs[run_id] = state
         self._active_run_id = run_id
         process = await asyncio.create_subprocess_exec(
@@ -474,10 +535,15 @@ class RunnerService:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
-        asyncio.create_task(self._read(run_id, process))
+        asyncio.create_task(self._read(run_id, process, on_complete))
         return run_id
 
-    async def _read(self, run_id: str, process: asyncio.subprocess.Process) -> None:
+    async def _read(
+        self,
+        run_id: str,
+        process: asyncio.subprocess.Process,
+        on_complete: Optional[OnComplete],
+    ) -> None:
         state = self._runs[run_id]
         assert process.stdout is not None
         async for raw in process.stdout:
@@ -489,9 +555,16 @@ class RunnerService:
         state.exit_code = process.returncode
         state.done = True
         state.ended_at = datetime.now(timezone.utc)
-        sentinel = {"type": "done"} if process.returncode == 0 else {"type": "error", "message": f"Process exited with code {process.returncode}"}
+        sentinel = (
+            {"type": "done"}
+            if process.returncode == 0
+            else {"type": "error", "message": f"Process exited with code {process.returncode}"}
+        )
         await state.queue.put(sentinel)
         self._active_run_id = None
+        if on_complete is not None:
+            await on_complete(run_id, state)
+
 
 # Singleton used across routers
 runner = RunnerService()
@@ -509,7 +582,7 @@ Expected: 7 passed
 
 ```bash
 git add api/services/runner.py api/tests/test_runner.py api/tests/fixtures/
-git commit -m "feat: add runner service with subprocess buffering and concurrency lock"
+git commit -m "feat: add runner service with subprocess buffering, concurrency lock, and on_complete callback"
 ```
 
 ---
@@ -518,84 +591,119 @@ git commit -m "feat: add runner service with subprocess buffering and concurrenc
 
 **Files:**
 - Create: `api/routers/assess.py`
-- Extend: `api/tests/test_routes.py`
+- Create: `api/tests/test_routes.py`
+
+Note: Tests use `httpx.AsyncClient` with ASGI transport to properly trigger the lifespan (DB init).
 
 - [ ] **Step 1: Write failing tests**
 
 ```python
 # api/tests/test_routes.py
 import pytest
-from fastapi.testclient import TestClient
-from api.main import app
+from httpx import AsyncClient, ASGITransport
+from main import app
 
-client = TestClient(app)
 
-def test_assess_missing_project_dir_returns_422():
-    resp = client.post("/api/assess", json={})
+@pytest.fixture
+async def client():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        yield c
+
+
+async def test_assess_missing_project_dir_returns_422(client):
+    resp = await client.post("/api/assess", json={})
     assert resp.status_code == 422
 
-def test_assess_nonexistent_path_returns_422(tmp_path):
-    resp = client.post("/api/assess", json={"project_dir": str(tmp_path / "missing")})
+
+async def test_assess_nonexistent_path_returns_422(client, tmp_path):
+    resp = await client.post("/api/assess", json={"project_dir": str(tmp_path / "missing")})
     assert resp.status_code == 422
 
-def test_assess_valid_returns_run_id(tmp_path):
-    resp = client.post("/api/assess", json={"project_dir": str(tmp_path)})
+
+async def test_assess_valid_returns_run_id(client, tmp_path):
+    resp = await client.post("/api/assess", json={"project_dir": str(tmp_path)})
     assert resp.status_code == 200
     data = resp.json()
     assert "run_id" in data
-    assert len(data["run_id"]) == 36  # UUID4 length
+    assert len(data["run_id"]) == 36  # UUID4
 
-def test_assess_409_when_busy(tmp_path):
-    # First call starts a run
-    client.post("/api/assess", json={"project_dir": str(tmp_path)})
-    # Second call should be rejected
-    resp = client.post("/api/assess", json={"project_dir": str(tmp_path)})
+
+async def test_assess_409_when_busy(client, tmp_path):
+    await client.post("/api/assess", json={"project_dir": str(tmp_path)})
+    resp = await client.post("/api/assess", json={"project_dir": str(tmp_path)})
     assert resp.status_code == 409
 ```
 
 - [ ] **Step 2: Run tests — expect FAIL**
 
 ```bash
-cd api && uv run pytest tests/test_routes.py::test_assess_missing_project_dir_returns_422 -v
+cd api && uv run pytest tests/test_routes.py -k "assess" -v
 ```
 
 - [ ] **Step 3: Implement `api/routers/assess.py`**
 
 ```python
 from __future__ import annotations
+from datetime import datetime, timezone
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
-from api.services.runner import runner, RunnerError
-from api.services.validator import validate_path, ValidationError
+from services.db import insert_run, update_run
+from services.runner import runner, RunnerError, RunState
+from services.validator import validate_path, ValidationError
 
 router = APIRouter()
 
-TAP_MIGRATION_DIR = Path(__file__).parent.parent.parent / "tap-migration"
+TAP_MIGRATION_DIR = str(Path(__file__).parent.parent.parent / "tap-migration")
+
 
 class AssessRequest(BaseModel):
     project_dir: str
     report_out: str = "./tap-assessment-report.md"
     volume_threshold: str = "small:500,medium:5000"
 
+
+def _find_report_path(buffer: list[str]) -> str | None:
+    for line in buffer:
+        if "report written to:" in line.lower():
+            return line.strip().split(":", 1)[-1].strip()
+    return None
+
+
 @router.post("/assess")
-async def start_assess(req: AssessRequest):
+async def start_assess(req: AssessRequest, request: Request):
     try:
         project_dir = validate_path(req.project_dir, must_exist=True, must_be_dir=True)
         report_out = validate_path(req.report_out)
     except ValidationError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
     cmd = [
-        "uv", "run", "assess.py",
+        "uv", "run", "python", "assess.py",
         "--project-dir", str(project_dir),
         "--report-out", str(report_out),
         "--volume-threshold", req.volume_threshold,
     ]
+
+    db = request.app.state.db
+
+    async def on_complete(run_id: str, state: RunState) -> None:
+        duration = (state.ended_at - state.started_at).total_seconds() if state.ended_at else None
+        status = "success" if state.exit_code == 0 else "failed"
+        await update_run(db, run_id=run_id, status=status,
+                         ended_at=state.ended_at.isoformat() if state.ended_at else "",
+                         duration_seconds=duration,
+                         report_path=_find_report_path(state.buffer))
+
     try:
-        run_id = await runner.start(cmd, cwd=str(TAP_MIGRATION_DIR))
+        run_id = await runner.start(cmd, cwd=TAP_MIGRATION_DIR, run_type="assess", on_complete=on_complete)
     except RunnerError as e:
         raise HTTPException(status_code=409, detail=str(e))
+
+    await insert_run(db, run_id=run_id, run_type="assess",
+                     started_at=datetime.now(timezone.utc).isoformat())
     return {"run_id": run_id}
+
 
 @router.websocket("/assess/ws/{run_id}")
 async def assess_ws(websocket: WebSocket, run_id: str):
@@ -604,7 +712,7 @@ async def assess_ws(websocket: WebSocket, run_id: str):
     if state is None:
         await websocket.close(code=4004)
         return
-    # Replay buffer
+    # Replay buffered lines (handles connect-before-ready race)
     for line in list(state.buffer):
         await websocket.send_json({"type": "log", "line": line})
     if state.done:
@@ -612,7 +720,6 @@ async def assess_ws(websocket: WebSocket, run_id: str):
         await websocket.send_json(sentinel)
         await websocket.close()
         return
-    # Stream live
     try:
         while True:
             msg = await state.queue.get()
@@ -645,15 +752,18 @@ git commit -m "feat: add assess router with POST and WebSocket endpoints"
 - Create: `api/routers/migrate.py`
 - Extend: `api/tests/test_routes.py`
 
-- [ ] **Step 1: Add failing tests to `test_routes.py`**
+- [ ] **Step 1: Add failing tests**
 
 ```python
-def test_migrate_missing_project_dir_returns_422():
-    resp = client.post("/api/migrate", json={})
+# append to api/tests/test_routes.py
+
+async def test_migrate_missing_project_dir_returns_422(client):
+    resp = await client.post("/api/migrate", json={})
     assert resp.status_code == 422
 
-def test_migrate_valid_dry_run_returns_run_id(tmp_path):
-    resp = client.post("/api/migrate", json={
+
+async def test_migrate_valid_dry_run_returns_run_id(client, tmp_path):
+    resp = await client.post("/api/migrate", json={
         "project_dir": str(tmp_path),
         "dry_run": True,
     })
@@ -671,15 +781,18 @@ cd api && uv run pytest tests/test_routes.py -k "migrate" -v
 
 ```python
 from __future__ import annotations
+from datetime import datetime, timezone
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
-from api.services.runner import runner, RunnerError
-from api.services.validator import validate_path, ValidationError
+from services.db import insert_run, update_run
+from services.runner import runner, RunnerError, RunState
+from services.validator import validate_path, ValidationError
 
 router = APIRouter()
 
-TAP_MIGRATION_DIR = Path(__file__).parent.parent.parent / "tap-migration"
+TAP_MIGRATION_DIR = str(Path(__file__).parent.parent.parent / "tap-migration")
+
 
 class MigrateRequest(BaseModel):
     project_dir: str
@@ -687,26 +800,50 @@ class MigrateRequest(BaseModel):
     dry_run: bool = False
     report_out: str = "./tap-migration-report.md"
 
+
+def _find_report_path(buffer: list[str]) -> str | None:
+    for line in buffer:
+        if "report written to:" in line.lower():
+            return line.strip().split(":", 1)[-1].strip()
+    return None
+
+
 @router.post("/migrate")
-async def start_migrate(req: MigrateRequest):
+async def start_migrate(req: MigrateRequest, request: Request):
     try:
         project_dir = validate_path(req.project_dir, must_exist=True, must_be_dir=True)
         report_out = validate_path(req.report_out)
     except ValidationError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
     cmd = [
-        "uv", "run", "migrate.py",
+        "uv", "run", "python", "migrate.py",
         "--project-dir", str(project_dir),
         "--env", req.env,
         "--report-out", str(report_out),
     ]
     if req.dry_run:
         cmd += ["--dry-run"]
+
+    db = request.app.state.db
+
+    async def on_complete(run_id: str, state: RunState) -> None:
+        duration = (state.ended_at - state.started_at).total_seconds() if state.ended_at else None
+        status = "success" if state.exit_code == 0 else "failed"
+        await update_run(db, run_id=run_id, status=status,
+                         ended_at=state.ended_at.isoformat() if state.ended_at else "",
+                         duration_seconds=duration,
+                         report_path=_find_report_path(state.buffer))
+
     try:
-        run_id = await runner.start(cmd, cwd=str(TAP_MIGRATION_DIR))
+        run_id = await runner.start(cmd, cwd=TAP_MIGRATION_DIR, run_type="migrate", on_complete=on_complete)
     except RunnerError as e:
         raise HTTPException(status_code=409, detail=str(e))
+
+    await insert_run(db, run_id=run_id, run_type="migrate",
+                     started_at=datetime.now(timezone.utc).isoformat())
     return {"run_id": run_id}
+
 
 @router.websocket("/migrate/ws/{run_id}")
 async def migrate_ws(websocket: WebSocket, run_id: str):
@@ -733,7 +870,7 @@ async def migrate_ws(websocket: WebSocket, run_id: str):
     await websocket.close()
 ```
 
-- [ ] **Step 4: Run tests — expect PASS**
+- [ ] **Step 4: Run all route tests — expect PASS**
 
 ```bash
 cd api && uv run pytest tests/test_routes.py -v
@@ -748,223 +885,83 @@ git commit -m "feat: add migrate router with POST and WebSocket endpoints"
 
 ---
 
-## Task 7: History router + DB wiring
+## Task 7: History router
 
 **Files:**
 - Create: `api/routers/history.py`
-- Modify: `api/main.py` (add DB lifespan)
-- Modify: `api/services/runner.py` (accept db conn, write history on exit)
 - Extend: `api/tests/test_routes.py`
 
-- [ ] **Step 1: Add failing history route tests**
+- [ ] **Step 1: Add failing tests**
 
 ```python
-def test_history_empty_returns_list():
-    resp = client.get("/api/history")
+# append to api/tests/test_routes.py
+
+async def test_history_empty_returns_list(client):
+    resp = await client.get("/api/history")
     assert resp.status_code == 200
     assert resp.json() == []
 
-def test_history_run_id_not_found_returns_404():
-    resp = client.get("/api/history/nonexistent-id")
+
+async def test_history_run_id_not_found_returns_404(client):
+    resp = await client.get("/api/history/nonexistent-id")
     assert resp.status_code == 404
+
+
+async def test_history_contains_run_after_assess(client, tmp_path):
+    import asyncio
+    post = await client.post("/api/assess", json={"project_dir": str(tmp_path)})
+    run_id = post.json()["run_id"]
+    await asyncio.sleep(0.1)
+    runs = (await client.get("/api/history")).json()
+    assert any(r["run_id"] == run_id for r in runs)
 ```
 
-- [ ] **Step 2: Implement `api/routers/history.py`**
+- [ ] **Step 2: Run tests — expect FAIL**
+
+```bash
+cd api && uv run pytest tests/test_routes.py -k "history" -v
+```
+
+- [ ] **Step 3: Implement `api/routers/history.py`**
 
 ```python
+from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 
 router = APIRouter()
 
+
 @router.get("/history")
 async def list_history(request: Request):
-    db = request.app.state.db
-    from api.services.db import list_runs
-    return await list_runs(db)
+    from services.db import list_runs
+    return await list_runs(request.app.state.db)
+
 
 @router.get("/history/{run_id}")
 async def get_history(run_id: str, request: Request):
-    db = request.app.state.db
-    from api.services.db import get_run
-    run = await get_run(db, run_id)
+    from services.db import get_run
+    run = await get_run(request.app.state.db, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
     report = None
     if run.get("report_path"):
-        from pathlib import Path
         p = Path(run["report_path"])
         if p.exists():
             report = p.read_text()
     return {**run, "report": report}
 ```
 
-- [ ] **Step 3: Add DB lifespan to `api/main.py`**
-
-```python
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from api.routers import assess, migrate, history
-from api.services.db import init_db
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    app.state.db = await init_db()
-    yield
-    await app.state.db.close()
-
-app = FastAPI(title="TAP Migration API", lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-app.include_router(assess.router, prefix="/api")
-app.include_router(migrate.router, prefix="/api")
-app.include_router(history.router, prefix="/api")
-```
-
-- [ ] **Step 4: Update `runner.py` — write to DB on exit**
-
-Add `db` parameter to `RunnerService.start()` and write to SQLite in `_read()`:
-
-```python
-# In RunnerService.start(), add db parameter:
-async def start(self, cmd: list[str], cwd: str | None = None, db=None) -> str:
-    # ... existing code ...
-    asyncio.create_task(self._read(run_id, process, db))
-    return run_id
-
-# In _read(), after state.done = True:
-async def _read(self, run_id: str, process, db) -> None:
-    # ... existing stdout reading loop ...
-    state.exit_code = process.returncode
-    state.done = True
-    state.ended_at = datetime.now(timezone.utc)
-    duration = (state.ended_at - state.started_at).total_seconds()
-    status = "success" if process.returncode == 0 else "failed"
-    # Find report path: check common output locations
-    report_path = None
-    for line in state.buffer:
-        if "report written to:" in line.lower():
-            parts = line.strip().split(":", 1)
-            if len(parts) == 2:
-                report_path = parts[1].strip()
-                break
-    if db is not None:
-        from api.services.db import insert_run, update_run
-        # insert may already exist if called before; use INSERT OR IGNORE
-        try:
-            await insert_run(db, run_id=run_id, run_type=self._runs[run_id]._run_type, started_at=state.started_at.isoformat())
-        except Exception:
-            pass
-        await update_run(db, run_id=run_id, status=status, ended_at=state.ended_at.isoformat(),
-                         duration_seconds=duration, report_path=report_path)
-    sentinel = {"type": "done"} if process.returncode == 0 else {"type": "error", "message": f"Process exited with code {process.returncode}"}
-    await state.queue.put(sentinel)
-    self._active_run_id = None
-```
-
-Also store `run_type` on `RunState` and pass it through `start()`:
-
-```python
-@dataclass
-class RunState:
-    run_id: str
-    _run_type: str = "unknown"
-    # ... rest unchanged
-```
-
-Update `start()` to accept `run_type: str` and pass it:
-
-```python
-async def start(self, cmd: list[str], cwd=None, db=None, run_type: str = "unknown") -> str:
-    run_id = str(uuid.uuid4())
-    state = RunState(run_id=run_id, _run_type=run_type)
-    # ...
-```
-
-Update `assess.py` and `migrate.py` routers to pass `run_type` and `db`:
-
-```python
-# In assess.py POST handler:
-db = request.app.state.db
-run_id = await runner.start(cmd, cwd=str(TAP_MIGRATION_DIR), db=db, run_type="assess")
-
-# In migrate.py POST handler:
-db = request.app.state.db
-run_id = await runner.start(cmd, cwd=str(TAP_MIGRATION_DIR), db=db, run_type="migrate")
-```
-
-Also add `request: Request` parameter to both POST handlers and insert_run at start:
-
-```python
-# In assess.py start_assess():
-from fastapi import Request
-async def start_assess(req: AssessRequest, request: Request):
-    # ... validation ...
-    db = request.app.state.db
-    await insert_run(db, run_id=run_id_placeholder... )
-    # Actually: insert after getting run_id from runner.start()
-```
-
-Simplest approach — insert into DB immediately after `runner.start()` returns:
-
-```python
-# assess.py
-from api.services.db import insert_run
-from datetime import datetime, timezone
-
-async def start_assess(req: AssessRequest, request: Request):
-    # ... validation ...
-    db = request.app.state.db
-    try:
-        run_id = await runner.start(cmd, cwd=str(TAP_MIGRATION_DIR))
-    except RunnerError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    await insert_run(db, run_id=run_id, run_type="assess",
-                     started_at=datetime.now(timezone.utc).isoformat())
-    return {"run_id": run_id}
-```
-
-Do the same in `migrate.py`. Remove the DB write from `runner._read()` — keep runner DB-agnostic. Runner only tracks in-memory state; routers write to DB.
-
-Final `_read()` in runner — just update status in memory and send sentinel. The route's WebSocket handler reads the sentinel, then the caller (or a background task) updates the DB.
-
-Simplest DB update approach: after WebSocket loop ends in the WS handler, update DB:
-
-```python
-# In assess_ws WebSocket handler, after the streaming loop:
-state = runner.get_state(run_id)
-if state and state.done:
-    from api.services.db import update_run
-    from datetime import timezone
-    duration = (state.ended_at - state.started_at).total_seconds() if state.ended_at else None
-    status = "success" if state.exit_code == 0 else "failed"
-    # Find report path from buffer
-    report_path = None
-    for line in state.buffer:
-        if "report written to:" in line.lower():
-            report_path = line.strip().split(":", 1)[-1].strip()
-            break
-    db = websocket.app.state.db
-    await update_run(db, run_id=run_id, status=status,
-                     ended_at=state.ended_at.isoformat() if state.ended_at else "",
-                     duration_seconds=duration, report_path=report_path)
-```
-
-- [ ] **Step 5: Run all tests — expect PASS**
+- [ ] **Step 4: Run all tests — expect PASS**
 
 ```bash
 cd api && uv run pytest -v
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add api/routers/history.py api/routers/assess.py api/routers/migrate.py api/main.py api/services/runner.py api/tests/test_routes.py
-git commit -m "feat: add history router and wire DB writes after subprocess completion"
+git add api/routers/history.py api/tests/test_routes.py
+git commit -m "feat: add history router"
 ```
 
 ---
@@ -987,10 +984,11 @@ cd frontend && npm install
 
 ```bash
 cd frontend
-npm install -D tailwindcss @tailwindcss/vite
+npm install -D tailwindcss @tailwindcss/vite @tailwindcss/typography
 ```
 
-Add to `vite.config.ts`:
+Replace `frontend/vite.config.ts`:
+
 ```typescript
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -998,50 +996,69 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: { '@': '/src' },
+  },
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: ['./src/test-setup.ts'],
+  },
 })
 ```
 
-Add to `src/index.css` (replace contents):
+Replace `frontend/src/index.css`:
+
 ```css
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 ```
 
-- [ ] **Step 3: Install shadcn/ui**
+- [ ] **Step 3: Install shadcn/ui (non-interactive)**
 
 ```bash
 cd frontend
-npx shadcn@latest init
-# Choose: New York style, Zinc color, yes to CSS variables
-```
-
-Install components used in this project:
-
-```bash
+npx shadcn@latest init --defaults
 npx shadcn@latest add button input switch card badge table dialog tabs label
 ```
 
-- [ ] **Step 4: Install other deps**
+- [ ] **Step 4: Install runtime and dev deps**
 
 ```bash
 cd frontend
 npm install react-router-dom react-markdown remark-gfm
-npm install -D @types/react-router-dom vitest @testing-library/react @testing-library/jest-dom @vitejs/plugin-react jsdom
+npm install -D vitest @testing-library/react @testing-library/jest-dom @vitejs/plugin-react jsdom
 ```
 
-- [ ] **Step 5: Create `.env.local`**
+- [ ] **Step 5: Add test script to `package.json`**
+
+In `frontend/package.json`, add to `"scripts"`:
+```json
+"test": "vitest",
+"test:run": "vitest run"
+```
+
+- [ ] **Step 6: Create test setup file**
+
+```typescript
+// frontend/src/test-setup.ts
+import '@testing-library/jest-dom'
+```
+
+- [ ] **Step 7: Create `.env.local`**
 
 ```
 VITE_API_BASE_URL=http://localhost:8000
 ```
 
-- [ ] **Step 6: Verify dev server starts**
+- [ ] **Step 8: Verify dev server starts**
 
 ```bash
 cd frontend && npm run dev
-# Should open http://localhost:5173 with default Vite page
+# Should open http://localhost:5173
 ```
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 cd /Users/cj/code/codeTest
@@ -1056,7 +1073,6 @@ git commit -m "chore: scaffold React + Vite + Tailwind + shadcn/ui frontend"
 **Files:**
 - Create: `frontend/src/lib/types.ts`
 - Create: `frontend/src/lib/api.ts`
-- Create: `frontend/src/lib/api.test.ts`
 
 - [ ] **Step 1: Create `frontend/src/lib/types.ts`**
 
@@ -1127,8 +1143,8 @@ export async function fetchHistory(): Promise<RunRecord[]> {
   return res.json()
 }
 
-export async function fetchRun(run_id: string): Promise<RunDetail> {
-  const res = await fetch(`${BASE}/api/history/${run_id}`)
+export async function fetchRun(runId: string): Promise<RunDetail> {
+  const res = await fetch(`${BASE}/api/history/${runId}`)
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
 }
@@ -1154,28 +1170,7 @@ git commit -m "feat: add shared TypeScript types and API client"
 - Create: `frontend/src/components/LogViewer.tsx`
 - Create: `frontend/src/components/LogViewer.test.tsx`
 
-- [ ] **Step 1: Configure Vitest in `vite.config.ts`**
-
-```typescript
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import tailwindcss from '@tailwindcss/vite'
-
-export default defineConfig({
-  plugins: [react(), tailwindcss()],
-  test: {
-    environment: 'jsdom',
-    setupFiles: ['./src/test-setup.ts'],
-  },
-})
-```
-
-Create `frontend/src/test-setup.ts`:
-```typescript
-import '@testing-library/jest-dom'
-```
-
-- [ ] **Step 2: Write failing test**
+- [ ] **Step 1: Write failing test**
 
 ```typescript
 // frontend/src/components/LogViewer.test.tsx
@@ -1194,13 +1189,13 @@ test('renders empty state when no lines', () => {
 })
 ```
 
-- [ ] **Step 3: Run test — expect FAIL**
+- [ ] **Step 2: Run test — expect FAIL**
 
 ```bash
-cd frontend && npx vitest run src/components/LogViewer.test.tsx
+cd frontend && npm run test:run -- src/components/LogViewer.test.tsx
 ```
 
-- [ ] **Step 4: Implement `frontend/src/components/LogViewer.tsx`**
+- [ ] **Step 3: Implement `frontend/src/components/LogViewer.tsx`**
 
 ```typescript
 import { useEffect, useRef } from 'react'
@@ -1237,13 +1232,13 @@ export function LogViewer({ lines, className }: Props) {
 }
 ```
 
-- [ ] **Step 5: Run test — expect PASS**
+- [ ] **Step 4: Run test — expect PASS**
 
 ```bash
-cd frontend && npx vitest run src/components/LogViewer.test.tsx
+cd frontend && npm run test:run -- src/components/LogViewer.test.tsx
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add frontend/src/components/LogViewer.tsx frontend/src/components/LogViewer.test.tsx frontend/src/test-setup.ts frontend/vite.config.ts
@@ -1265,13 +1260,13 @@ git commit -m "feat: add LogViewer component"
 import { render, screen } from '@testing-library/react'
 import { ReportViewer } from './ReportViewer'
 
-test('renders markdown content', () => {
+test('renders markdown headings', () => {
   render(<ReportViewer markdown="# Hello\n\nWorld" />)
   expect(screen.getByRole('heading', { name: 'Hello' })).toBeInTheDocument()
   expect(screen.getByText('World')).toBeInTheDocument()
 })
 
-test('renders empty state when no markdown', () => {
+test('renders empty state when markdown is null', () => {
   render(<ReportViewer markdown={null} />)
   expect(screen.getByText(/no report/i)).toBeInTheDocument()
 })
@@ -1280,7 +1275,7 @@ test('renders empty state when no markdown', () => {
 - [ ] **Step 2: Run test — expect FAIL**
 
 ```bash
-cd frontend && npx vitest run src/components/ReportViewer.test.tsx
+cd frontend && npm run test:run -- src/components/ReportViewer.test.tsx
 ```
 
 - [ ] **Step 3: Implement `frontend/src/components/ReportViewer.tsx`**
@@ -1312,21 +1307,10 @@ export function ReportViewer({ markdown, className }: Props) {
 }
 ```
 
-Install prose plugin:
-
-```bash
-cd frontend && npm install -D @tailwindcss/typography
-```
-
-Add to `src/index.css`:
-```css
-@plugin "@tailwindcss/typography";
-```
-
 - [ ] **Step 4: Run test — expect PASS**
 
 ```bash
-cd frontend && npx vitest run src/components/ReportViewer.test.tsx
+cd frontend && npm run test:run -- src/components/ReportViewer.test.tsx
 ```
 
 - [ ] **Step 5: Commit**
@@ -1349,7 +1333,7 @@ git commit -m "feat: add ReportViewer component with Markdown rendering"
 ```typescript
 // frontend/src/components/ConfigForm.test.tsx
 import { render, screen, fireEvent } from '@testing-library/react'
-import { ConfigForm, FieldDef } from './ConfigForm'
+import { ConfigForm, type FieldDef } from './ConfigForm'
 
 const fields: FieldDef[] = [
   { name: 'project_dir', label: 'Project Directory', type: 'text', required: true },
@@ -1372,10 +1356,10 @@ test('calls onSubmit with field values', () => {
 
 test('disables submit when disabled=true', () => {
   render(<ConfigForm fields={fields} onSubmit={vi.fn()} disabled={true} />)
-  expect(screen.getByRole('button', { name: /run/i })).toBeDisabled()
+  expect(screen.getByRole('button', { name: /running/i })).toBeDisabled()
 })
 
-test('blocks submit when required field empty', () => {
+test('blocks submit when required field is empty', () => {
   const onSubmit = vi.fn()
   render(<ConfigForm fields={fields} onSubmit={onSubmit} disabled={false} />)
   fireEvent.click(screen.getByRole('button', { name: /run/i }))
@@ -1386,7 +1370,7 @@ test('blocks submit when required field empty', () => {
 - [ ] **Step 2: Run test — expect FAIL**
 
 ```bash
-cd frontend && npx vitest run src/components/ConfigForm.test.tsx
+cd frontend && npm run test:run -- src/components/ConfigForm.test.tsx
 ```
 
 - [ ] **Step 3: Implement `frontend/src/components/ConfigForm.tsx`**
@@ -1416,7 +1400,9 @@ interface Props {
 
 export function ConfigForm({ fields, onSubmit, disabled, submitLabel = 'Run' }: Props) {
   const [values, setValues] = useState<Record<string, string | boolean>>(() =>
-    Object.fromEntries(fields.map((f) => [f.name, f.defaultValue ?? (f.type === 'toggle' ? false : '')]))
+    Object.fromEntries(
+      fields.map((f) => [f.name, f.defaultValue ?? (f.type === 'toggle' ? false : '')])
+    )
   )
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -1438,7 +1424,6 @@ export function ConfigForm({ fields, onSubmit, disabled, submitLabel = 'Run' }: 
               value={values[f.name] as string}
               onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
               placeholder={f.placeholder}
-              required={f.required}
             />
           ) : (
             <Switch
@@ -1460,7 +1445,7 @@ export function ConfigForm({ fields, onSubmit, disabled, submitLabel = 'Run' }: 
 - [ ] **Step 4: Run test — expect PASS**
 
 ```bash
-cd frontend && npx vitest run src/components/ConfigForm.test.tsx
+cd frontend && npm run test:run -- src/components/ConfigForm.test.tsx
 ```
 
 - [ ] **Step 5: Commit**
@@ -1477,13 +1462,11 @@ git commit -m "feat: add ConfigForm component"
 **Files:**
 - Create: `frontend/src/pages/AssessPage.tsx`
 
-No unit test needed — page wires components that are already tested. Verified via manual E2E.
-
 - [ ] **Step 1: Implement `frontend/src/pages/AssessPage.tsx`**
 
 ```typescript
 import { useState, useCallback } from 'react'
-import { ConfigForm, FieldDef } from '@/components/ConfigForm'
+import { ConfigForm, type FieldDef } from '@/components/ConfigForm'
 import { LogViewer } from '@/components/LogViewer'
 import { ReportViewer } from '@/components/ReportViewer'
 import { startAssess, createWs, fetchRun } from '@/lib/api'
@@ -1509,14 +1492,15 @@ export function AssessPage() {
     try {
       const { run_id } = await startAssess({
         project_dir: values.project_dir as string,
-        report_out: values.report_out as string || undefined,
-        volume_threshold: values.volume_threshold as string || undefined,
+        report_out: (values.report_out as string) || undefined,
+        volume_threshold: (values.volume_threshold as string) || undefined,
       })
       const ws = createWs(`/api/assess/ws/${run_id}`)
       ws.onmessage = (e) => {
         const msg: WsMessage = JSON.parse(e.data)
-        if (msg.type === 'log') setLogs((l) => [...l, msg.line])
-        else if (msg.type === 'done') {
+        if (msg.type === 'log') {
+          setLogs((l) => [...l, msg.line])
+        } else if (msg.type === 'done') {
           fetchRun(run_id).then((r) => setReport(r.report))
           setRunning(false)
           ws.close()
@@ -1526,7 +1510,10 @@ export function AssessPage() {
           ws.close()
         }
       }
-      ws.onerror = () => { setError('WebSocket connection failed'); setRunning(false) }
+      ws.onerror = () => {
+        setError('WebSocket connection failed')
+        setRunning(false)
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Unknown error')
       setRunning(false)
@@ -1534,7 +1521,7 @@ export function AssessPage() {
   }, [])
 
   return (
-    <div className="grid grid-cols-[320px_1fr] gap-6 h-full">
+    <div className="grid grid-cols-[320px_1fr] gap-6">
       <aside className="space-y-4">
         <h2 className="text-lg font-semibold">Assessment</h2>
         <ConfigForm fields={FIELDS} onSubmit={handleSubmit} disabled={running} />
@@ -1567,7 +1554,7 @@ git commit -m "feat: add AssessPage"
 
 ```typescript
 import { useState, useCallback } from 'react'
-import { ConfigForm, FieldDef } from '@/components/ConfigForm'
+import { ConfigForm, type FieldDef } from '@/components/ConfigForm'
 import { LogViewer } from '@/components/LogViewer'
 import { ReportViewer } from '@/components/ReportViewer'
 import { startMigrate, createWs, fetchRun } from '@/lib/api'
@@ -1594,15 +1581,16 @@ export function MigratePage() {
     try {
       const { run_id } = await startMigrate({
         project_dir: values.project_dir as string,
-        env: values.env as string || undefined,
+        env: (values.env as string) || undefined,
         dry_run: values.dry_run as boolean,
-        report_out: values.report_out as string || undefined,
+        report_out: (values.report_out as string) || undefined,
       })
       const ws = createWs(`/api/migrate/ws/${run_id}`)
       ws.onmessage = (e) => {
         const msg: WsMessage = JSON.parse(e.data)
-        if (msg.type === 'log') setLogs((l) => [...l, msg.line])
-        else if (msg.type === 'done') {
+        if (msg.type === 'log') {
+          setLogs((l) => [...l, msg.line])
+        } else if (msg.type === 'done') {
           fetchRun(run_id).then((r) => setReport(r.report))
           setRunning(false)
           ws.close()
@@ -1612,7 +1600,10 @@ export function MigratePage() {
           ws.close()
         }
       }
-      ws.onerror = () => { setError('WebSocket connection failed'); setRunning(false) }
+      ws.onerror = () => {
+        setError('WebSocket connection failed')
+        setRunning(false)
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Unknown error')
       setRunning(false)
@@ -1620,7 +1611,7 @@ export function MigratePage() {
   }, [])
 
   return (
-    <div className="grid grid-cols-[320px_1fr] gap-6 h-full">
+    <div className="grid grid-cols-[320px_1fr] gap-6">
       <aside className="space-y-4">
         <h2 className="text-lg font-semibold">Migration</h2>
         <ConfigForm fields={FIELDS} onSubmit={handleSubmit} disabled={running} />
@@ -1664,7 +1655,7 @@ const runs: RunRecord[] = [
   { run_id: 'def', type: 'migrate', status: 'failed', started_at: '2026-01-01T11:00:00Z', ended_at: null, duration_seconds: null },
 ]
 
-test('renders run rows', () => {
+test('renders run type for each row', () => {
   render(<HistoryList runs={runs} onSelect={vi.fn()} />)
   expect(screen.getByText('assess')).toBeInTheDocument()
   expect(screen.getByText('migrate')).toBeInTheDocument()
@@ -1676,12 +1667,17 @@ test('calls onSelect with run_id when row clicked', () => {
   fireEvent.click(screen.getByText('assess').closest('tr')!)
   expect(onSelect).toHaveBeenCalledWith('abc')
 })
+
+test('renders empty state when no runs', () => {
+  render(<HistoryList runs={[]} onSelect={vi.fn()} />)
+  expect(screen.getByText(/no runs/i)).toBeInTheDocument()
+})
 ```
 
 - [ ] **Step 2: Run test — expect FAIL**
 
 ```bash
-cd frontend && npx vitest run src/components/HistoryList.test.tsx
+cd frontend && npm run test:run -- src/components/HistoryList.test.tsx
 ```
 
 - [ ] **Step 3: Implement `frontend/src/components/HistoryList.tsx`**
@@ -1693,7 +1689,7 @@ import type { RunRecord } from '@/lib/types'
 
 interface Props {
   runs: RunRecord[]
-  onSelect: (run_id: string) => void
+  onSelect: (runId: string) => void
 }
 
 export function HistoryList({ runs, onSelect }: Props) {
@@ -1713,15 +1709,29 @@ export function HistoryList({ runs, onSelect }: Props) {
       </TableHeader>
       <TableBody>
         {runs.map((r) => (
-          <TableRow key={r.run_id} className="cursor-pointer hover:bg-zinc-100" onClick={() => onSelect(r.run_id)}>
-            <TableCell className="font-mono text-xs">{new Date(r.started_at).toLocaleString()}</TableCell>
+          <TableRow
+            key={r.run_id}
+            className="cursor-pointer hover:bg-zinc-100"
+            onClick={() => onSelect(r.run_id)}
+          >
+            <TableCell className="font-mono text-xs">
+              {new Date(r.started_at).toLocaleString()}
+            </TableCell>
             <TableCell>{r.type}</TableCell>
             <TableCell>
-              <Badge variant={r.status === 'success' ? 'default' : r.status === 'failed' ? 'destructive' : 'secondary'}>
+              <Badge
+                variant={
+                  r.status === 'success' ? 'default'
+                  : r.status === 'failed' ? 'destructive'
+                  : 'secondary'
+                }
+              >
                 {r.status}
               </Badge>
             </TableCell>
-            <TableCell>{r.duration_seconds != null ? `${r.duration_seconds.toFixed(1)}s` : '—'}</TableCell>
+            <TableCell>
+              {r.duration_seconds != null ? `${r.duration_seconds.toFixed(1)}s` : '—'}
+            </TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -1733,7 +1743,7 @@ export function HistoryList({ runs, onSelect }: Props) {
 - [ ] **Step 4: Run test — expect PASS**
 
 ```bash
-cd frontend && npx vitest run src/components/HistoryList.test.tsx
+cd frontend && npm run test:run -- src/components/HistoryList.test.tsx
 ```
 
 - [ ] **Step 5: Implement `frontend/src/pages/HistoryPage.tsx`**
@@ -1755,8 +1765,8 @@ export function HistoryPage() {
     fetchHistory().then(setRuns).catch(console.error)
   }, [])
 
-  const handleSelect = async (run_id: string) => {
-    const detail = await fetchRun(run_id).catch(() => null)
+  const handleSelect = async (runId: string) => {
+    const detail = await fetchRun(runId).catch(() => null)
     setSelected(detail)
     setOpen(true)
   }
@@ -1867,28 +1877,39 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 - [ ] **Step 3: Run all frontend tests**
 
 ```bash
-cd frontend && npx vitest run
+cd frontend && npm run test:run
 ```
 
-Expected: all component tests pass.
+Expected: all component tests pass (LogViewer, ReportViewer, ConfigForm, HistoryList)
 
-- [ ] **Step 4: Start both servers and verify manually**
+- [ ] **Step 4: Run all backend tests**
+
+```bash
+cd api && uv run pytest -v
+```
+
+Expected: all tests pass
+
+- [ ] **Step 5: Smoke test both servers**
 
 ```bash
 # Terminal 1
 cd api && uv run uvicorn main:app --reload --port 8000
+# If 8000 is taken: --port 8001 (update VITE_API_BASE_URL in frontend/.env.local accordingly)
 
 # Terminal 2
 cd frontend && npm run dev
+# Opens http://localhost:5173
+# If 5173 is taken: npm run dev -- --port 5174
 ```
 
-Open http://localhost:5173 — verify:
+Verify:
 - Nav links work (Assess / Migrate / History)
-- Assess form renders 3 fields
-- Migrate form renders 4 fields (including dry-run toggle)
-- History page loads (empty table is fine)
+- Assess form shows 3 fields
+- Migrate form shows 4 fields including dry-run toggle
+- History page loads with empty table
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add frontend/src/App.tsx frontend/src/main.tsx
@@ -1901,13 +1922,12 @@ git commit -m "feat: wire React Router, nav, and all pages into App"
 
 Before declaring done:
 
-- [ ] Start API server (`cd api && uv run uvicorn main:app --reload --port 8000`)
-- [ ] Start frontend (`cd frontend && npm run dev`)
-- [ ] Assess: enter a real project directory, click Run, see logs stream, see report render
-- [ ] Migrate: enter same directory, enable dry-run, click Run, see logs, see report
-- [ ] History: navigate to History, see both runs listed with correct status and duration
-- [ ] Click a history row, see the report modal open
-- [ ] Try running a second job while one is in progress — verify 409 error shown in UI
+- [ ] Assess: enter a real project directory, click Run, confirm logs stream in real time, confirm report renders after completion
+- [ ] Migrate: enter same directory, enable dry-run, click Run, confirm logs stream, confirm report renders
+- [ ] History: navigate to History page, confirm both runs appear with correct type/status/duration
+- [ ] Click a history row, confirm report modal opens with correct content
+- [ ] Start a second run while one is in progress — confirm UI shows the 409 error message
+- [ ] Stop and restart the API server — confirm history persists across restarts
 
 ---
 
