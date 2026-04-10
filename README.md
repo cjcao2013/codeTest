@@ -18,6 +18,8 @@ Tools and skills for migrating test automation projects to the TAP (Test Automat
 | Directory | Purpose |
 |-----------|---------|
 | `tap-migration/` | Python + uv scripts for test data/case migration |
+| `api/` | FastAPI backend for the web demo |
+| `frontend/` | React frontend for the web demo |
 
 ---
 
@@ -101,3 +103,54 @@ Assessment (tap-migration-assessment skill)
 ```
 
 **Pipeline migration** (connecting CI/CD to TAP) is a separate step — see `tap-migration-assessment` skill.
+
+---
+
+## Web Demo (Frontend + API)
+
+A local web interface for running assessments and migrations through a browser.
+
+### What it provides
+
+- **Assess page** — fill in project path, run assessment, watch live logs, view report
+- **Migrate page** — configure migration options (including dry-run), run, watch logs, view report
+- **History page** — browse past runs, click any row to view its report
+
+### Tech stack
+
+| Layer | Tech |
+|-------|------|
+| Frontend | React 18 + Vite + TypeScript + shadcn/ui + TailwindCSS |
+| Backend API | FastAPI + uvicorn + aiosqlite |
+| Real-time logs | WebSocket |
+| History storage | SQLite |
+
+### Quick Start
+
+**Prerequisites:** Python 3.11+, Node.js 18+, uv
+
+```bash
+# Terminal 1 — API server
+cd api
+uv sync --extra dev
+uv run uvicorn main:app --reload --port 8000
+
+# Terminal 2 — Frontend
+cd frontend
+npm install
+npm run dev
+# Opens http://localhost:5173
+```
+
+> If port 8000 is taken: use `--port 8001` and update `frontend/.env.local` accordingly.
+> If port 5173 is taken: use `npm run dev -- --port 5174`.
+
+### Running tests
+
+```bash
+# Backend (25 tests)
+cd api && uv run pytest -v
+
+# Frontend (11 tests)
+cd frontend && npm run test:run
+```
