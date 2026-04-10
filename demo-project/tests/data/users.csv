@@ -1,0 +1,13 @@
+user_id,name,email,role,active
+USR-001,Alice Chen,alice@example.com,customer,true
+USR-002,Bob Smith,bob@example.com,customer,true
+USR-003,Carol Wu,carol@example.com,admin,true
+USR-004,David Kim,david@example.com,customer,false
+USR-005,Emma Jones,emma@example.com,customer,true
+USR-006,Frank Lee,frank@example.com,support,true
+USR-007,Grace Park,grace@example.com,customer,true
+USR-008,Henry Brown,henry@example.com,customer,false
+USR-009,Iris Wang,iris@example.com,admin,true
+USR-010,Jack Miller,jack@example.com,customer,true
+USR-011,Karen Davis,karen@example.com,customer,true
+USR-012,Leo Zhang,leo@example.com,support,true

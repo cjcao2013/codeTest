@@ -1,0 +1,21 @@
+order_id,customer_name,amount,status,created_at
+ORD-001,Alice Chen,128.50,completed,2024-01-15
+ORD-002,Bob Smith,45.00,pending,2024-01-16
+ORD-003,Carol Wu,289.99,completed,2024-01-17
+ORD-004,David Kim,73.25,cancelled,2024-01-18
+ORD-005,Emma Jones,156.80,completed,2024-01-19
+ORD-006,Frank Lee,92.00,pending,2024-01-20
+ORD-007,Grace Park,340.50,completed,2024-01-21
+ORD-008,Henry Brown,18.99,refunded,2024-01-22
+ORD-009,Iris Wang,210.00,completed,2024-01-23
+ORD-010,Jack Miller,67.50,pending,2024-01-24
+ORD-011,Karen Davis,445.00,completed,2024-01-25
+ORD-012,Leo Zhang,33.75,cancelled,2024-01-26
+ORD-013,Mia Johnson,187.25,completed,2024-01-27
+ORD-014,Noah Wilson,94.00,pending,2024-01-28
+ORD-015,Olivia Moore,520.00,completed,2024-01-29
+ORD-016,Paul Taylor,62.50,refunded,2024-01-30
+ORD-017,Quinn Anderson,138.00,completed,2024-01-31
+ORD-018,Rachel Thomas,275.50,pending,2024-02-01
+ORD-019,Sam Jackson,49.99,completed,2024-02-02
+ORD-020,Tina White,382.00,completed,2024-02-03

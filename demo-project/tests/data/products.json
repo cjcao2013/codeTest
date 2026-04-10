@@ -1,0 +1,17 @@
+[
+  {"product_id": "PRD-001", "name": "Wireless Headphones", "category": "Electronics", "price": 89.99, "stock": 150},
+  {"product_id": "PRD-002", "name": "Leather Wallet", "category": "Accessories", "price": 45.00, "stock": 320},
+  {"product_id": "PRD-003", "name": "Running Shoes", "category": "Footwear", "price": 129.99, "stock": 85},
+  {"product_id": "PRD-004", "name": "Coffee Maker", "category": "Kitchen", "price": 79.50, "stock": 60},
+  {"product_id": "PRD-005", "name": "Yoga Mat", "category": "Sports", "price": 35.00, "stock": 200},
+  {"product_id": "PRD-006", "name": "Bluetooth Speaker", "category": "Electronics", "price": 65.99, "stock": 110},
+  {"product_id": "PRD-007", "name": "Sunglasses", "category": "Accessories", "price": 55.00, "stock": 175},
+  {"product_id": "PRD-008", "name": "Backpack", "category": "Bags", "price": 95.00, "stock": 90},
+  {"product_id": "PRD-009", "name": "Smart Watch", "category": "Electronics", "price": 249.99, "stock": 45},
+  {"product_id": "PRD-010", "name": "Water Bottle", "category": "Sports", "price": 28.50, "stock": 400},
+  {"product_id": "PRD-011", "name": "Desk Lamp", "category": "Home", "price": 42.00, "stock": 130},
+  {"product_id": "PRD-012", "name": "Notebook Set", "category": "Stationery", "price": 18.99, "stock": 500},
+  {"product_id": "PRD-013", "name": "Portable Charger", "category": "Electronics", "price": 39.99, "stock": 220},
+  {"product_id": "PRD-014", "name": "Kitchen Knife Set", "category": "Kitchen", "price": 185.00, "stock": 35},
+  {"product_id": "PRD-015", "name": "Throw Blanket", "category": "Home", "price": 59.99, "stock": 160}
+]
