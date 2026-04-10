@@ -26,7 +26,7 @@ def upload_records(
 ) -> UploadResult:
     """Upload records to a TAP API endpoint. Continue-on-error per record; abort on auth failure."""
     result = UploadResult()
-    with httpx.Client(timeout=30) as client:
+    with httpx.Client(timeout=30, trust_env=False) as client:
         for record in records:
             _upload_one(client, record, endpoint, token, result)
     return result
