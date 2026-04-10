@@ -1,5 +1,6 @@
 from __future__ import annotations
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 import httpx
 
@@ -23,12 +24,19 @@ def upload_records(
     records: list[dict],
     endpoint: str,
     token: str,
+    on_progress: Callable[[int, int, dict], None] | None = None,
+    upload_delay: float = 0.0,
 ) -> UploadResult:
     """Upload records to a TAP API endpoint. Continue-on-error per record; abort on auth failure."""
     result = UploadResult()
+    total = len(records)
     with httpx.Client(timeout=30, trust_env=False) as client:
-        for record in records:
+        for i, record in enumerate(records, start=1):
             _upload_one(client, record, endpoint, token, result)
+            if on_progress is not None:
+                on_progress(i, total, record)
+            if upload_delay > 0:
+                time.sleep(upload_delay)
     return result
 
 
@@ -49,13 +57,11 @@ def _upload_one(
             if response.is_success:
                 result.uploaded += 1
                 return
-            # Non-auth HTTP error: don't retry, fail immediately
             last_error = f"HTTP {response.status_code}"
-            break  # Don't retry HTTP errors
+            break
         except AuthError:
             raise
         except Exception as exc:
-            # Network/timeout errors: retry with backoff
             last_error = str(exc)
             if attempt < _MAX_RETRIES - 1:
                 time.sleep(_RETRY_BASE_SECONDS * (2 ** attempt))
