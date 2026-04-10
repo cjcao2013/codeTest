@@ -31,3 +31,23 @@ test('blocks submit when required field is empty', () => {
   fireEvent.click(screen.getByRole('button', { name: /run/i }))
   expect(onSubmit).not.toHaveBeenCalled()
 })
+
+test('renders number input for type number field', () => {
+  const numberFields: FieldDef[] = [
+    { name: 'delay', label: 'Upload Delay', type: 'number', required: false, defaultValue: 0 },
+  ]
+  render(<ConfigForm fields={numberFields} onSubmit={vi.fn()} disabled={false} />)
+  const input = screen.getByLabelText('Upload Delay')
+  expect(input).toHaveAttribute('type', 'number')
+})
+
+test('submits numeric value for number field', () => {
+  const onSubmit = vi.fn()
+  const numberFields: FieldDef[] = [
+    { name: 'delay', label: 'Upload Delay', type: 'number', required: false, defaultValue: 0 },
+  ]
+  render(<ConfigForm fields={numberFields} onSubmit={onSubmit} disabled={false} />)
+  fireEvent.change(screen.getByLabelText('Upload Delay'), { target: { value: '0.3' } })
+  fireEvent.click(screen.getByRole('button', { name: /run/i }))
+  expect(onSubmit).toHaveBeenCalledWith({ delay: '0.3' })
+})

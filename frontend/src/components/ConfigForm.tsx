@@ -7,10 +7,13 @@ import { Label } from '@/components/ui/label'
 export interface FieldDef {
   name: string
   label: string
-  type: 'text' | 'toggle'
+  type: 'text' | 'toggle' | 'number'
   required: boolean
-  defaultValue?: string | boolean
+  defaultValue?: string | boolean | number
   placeholder?: string
+  step?: number
+  min?: number
+  max?: number
 }
 
 interface Props {
@@ -23,7 +26,12 @@ interface Props {
 export function ConfigForm({ fields, onSubmit, disabled, submitLabel = 'Run' }: Props) {
   const [values, setValues] = useState<Record<string, string | boolean>>(() =>
     Object.fromEntries(
-      fields.map((f) => [f.name, f.defaultValue ?? (f.type === 'toggle' ? false : '')])
+      fields.map((f) => [
+        f.name,
+        f.defaultValue !== undefined
+          ? (f.type === 'toggle' ? Boolean(f.defaultValue) : String(f.defaultValue))
+          : (f.type === 'toggle' ? false : ''),
+      ])
     )
   )
 
@@ -47,6 +55,19 @@ export function ConfigForm({ fields, onSubmit, disabled, submitLabel = 'Run' }: 
                 value={values[f.name] as string}
                 onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
                 placeholder={f.placeholder}
+              />
+            </>
+          ) : f.type === 'number' ? (
+            <>
+              <Label htmlFor={f.name}>{f.label}</Label>
+              <Input
+                id={f.name}
+                type="number"
+                value={values[f.name] as string}
+                onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+                step={f.step}
+                min={f.min}
+                max={f.max}
               />
             </>
           ) : (
