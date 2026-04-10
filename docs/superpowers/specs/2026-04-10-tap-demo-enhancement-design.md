@@ -1,7 +1,7 @@
 # TAP Migration Demo Enhancement — Design Spec
 
 **Date:** 2026-04-10
-**Status:** Draft
+**Status:** Reviewed
 **Scope:** Replace the bare `rich` test project with a demo-friendly e-commerce test suite, and add per-record progress logging + configurable upload delay to `migrate.py`.
 
 ---
@@ -131,9 +131,15 @@ testpaths = ["tests"]
 
 ### 2a. `src/uploader.py` — Progress callback
 
-Add an optional `on_progress` callback to `upload_records`:
+Add an optional `on_progress` callback and `upload_delay` to `upload_records`.
+
+Add `from typing import Callable` at the top of `uploader.py`.
+
+New signature:
 
 ```python
+from typing import Callable
+
 def upload_records(
     records: list[dict],
     endpoint: str,
@@ -143,9 +149,9 @@ def upload_records(
 ) -> UploadResult:
 ```
 
-- `on_progress(current, total, record)` — called after each successful or failed upload
-- `upload_delay` — seconds to sleep after each record (default `0.0`)
-- Existing callers with no callback continue to work unchanged
+- `on_progress(current, total, record)` — called after each record attempt (success or failure), where `record` is the full dict (e.g. `{"id": "ORD-001", "name": "ORD-001", "data": {...}}`). The callback receives the raw record so the caller can extract the label.
+- `upload_delay` — seconds to `time.sleep()` after each record (default `0.0`). Delay applies only in normal upload mode; it is ignored when `upload_records` is not called (e.g. dry-run exits before calling `upload_records`).
+- Existing callers with no callback and no delay continue to work unchanged.
 
 ### 2b. `migrate.py` — Progress output + `--upload-delay` flag
 
@@ -166,15 +172,21 @@ Uploading test cases: 2/42  test_payment_declined_insufficient_funds
 Uploading test cases: 42/42  test_admin_can_view_all_users
 ```
 
-Record label is derived from: `record.get("id") or record.get("name") or ""`.
+Record label extracted in the callback by migrate.py: `record.get("id") or record.get("name") or ""`.
 
 ### 2c. Frontend `MigratePage` — `--upload-delay` field
 
-Add one new optional field to the Migrate form:
+Add one new optional field to the Migrate form.
+
+**`frontend/src/components/ConfigForm.tsx`**: Extend `FieldDef` to support `type: 'number'` in addition to existing `'text' | 'toggle'`. Render a `<Input type="number">` with `step`, `min`, `max` props when `type === 'number'`.
+
+**`frontend/src/pages/MigratePage.tsx`**: Add the new field to the fields array:
 
 | Flag | Type | Default | UI Control |
 |------|------|---------|------------|
 | `--upload-delay` | float | `0.0` | Number input (step 0.1, min 0, max 2.0) |
+
+**`api/routers/migrate.py`**: Add `upload_delay: float = 0.0` to `MigrateRequest` Pydantic model. Include `"--upload-delay", str(req.upload_delay)` in the subprocess command args (always included, even when `0.0`).
 
 ---
 
@@ -191,7 +203,9 @@ Add one new optional field to the Migrate form:
 | Create | `demo-project/tests/data/users.csv` |
 | Modify | `tap-migration/src/uploader.py` |
 | Modify | `tap-migration/migrate.py` |
+| Modify | `frontend/src/components/ConfigForm.tsx` |
 | Modify | `frontend/src/pages/MigratePage.tsx` |
+| Modify | `api/routers/migrate.py` |
 
 ---
 
