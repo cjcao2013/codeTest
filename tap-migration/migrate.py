@@ -13,9 +13,12 @@ from src.reporter import render_migration_report
 
 app = typer.Typer()
 
-# --- TAP API endpoints (fill in after confirming with TAP team) ---
-_TEST_DATA_ENDPOINT = "{TAP_API_BASE_URL}/test-data"    # TBD
-_TEST_CASE_ENDPOINT = "{TAP_API_BASE_URL}/test-cases"   # TBD
+_TEST_DATA_ENDPOINT = "{TAP_API_BASE_URL}/test-data"
+_TEST_CASE_ENDPOINT = "{TAP_API_BASE_URL}/test-cases"
+
+
+def _record_label(record: dict) -> str:
+    return str(record.get("id") or record.get("name") or "")
 
 
 @app.command()
@@ -24,6 +27,7 @@ def main(
     env: Path = typer.Option(Path(".env"), help="Path to .env file"),
     dry_run: bool = typer.Option(False, help="Convert only, skip upload"),
     report_out: Path = typer.Option(Path("./tap-migration-report.md"), help="Output path for report"),
+    upload_delay: float = typer.Option(0.0, help="Seconds to wait between uploads (use 0.2–0.5 for demos)"),
 ) -> None:
     load_dotenv(env)
     base_url = os.getenv("TAP_API_BASE_URL", "")
@@ -35,7 +39,6 @@ def main(
 
     scan = scan_project(project_dir)
 
-    # Convert test data
     all_data_records: list[dict] = []
     for data_file in scan.test_data_paths:
         try:
@@ -43,7 +46,6 @@ def main(
         except ConversionError as e:
             typer.echo(f"WARN: skipping {data_file.name} — {e}")
 
-    # Convert test cases
     all_case_records: list[dict] = []
     for case_file in scan.test_case_paths:
         all_case_records.extend(convert_test_case_file(case_file))
@@ -54,28 +56,35 @@ def main(
         typer.echo("Dry-run mode — skipping upload.")
         raise typer.Exit(0)
 
-    # Upload
     data_endpoint = _TEST_DATA_ENDPOINT.format(TAP_API_BASE_URL=base_url)
     case_endpoint = _TEST_CASE_ENDPOINT.format(TAP_API_BASE_URL=base_url)
 
+    def _make_progress(label: str, total: int):
+        def _cb(current: int, _total: int, record: dict) -> None:
+            typer.echo(f"Uploading {label}: {current}/{total}  {_record_label(record)}")
+        return _cb
+
     try:
-        typer.echo("Uploading test data...")
-        data_result = upload_records(all_data_records, data_endpoint, token)
-        typer.echo("Uploading test cases...")
-        case_result = upload_records(all_case_records, case_endpoint, token)
+        data_result = upload_records(
+            all_data_records, data_endpoint, token,
+            on_progress=_make_progress("test data", len(all_data_records)),
+            upload_delay=upload_delay,
+        )
+        case_result = upload_records(
+            all_case_records, case_endpoint, token,
+            on_progress=_make_progress("test cases", len(all_case_records)),
+            upload_delay=upload_delay,
+        )
     except AuthError as e:
         typer.echo(f"ERROR: Authentication failed — {e}", err=True)
         raise typer.Exit(1)
 
-    # Validate — TAP API returns no payload, so we do a count-only check:
-    # slice local records to the number successfully uploaded to simulate what TAP received.
     combined_local = all_data_records + all_case_records
     validation = validate_migration(
         local_records=combined_local,
         uploaded_records=combined_local[:data_result.uploaded + case_result.uploaded],
     )
 
-    # Report
     report = render_migration_report(
         project_name=project_dir.name,
         data_upload=data_result,
