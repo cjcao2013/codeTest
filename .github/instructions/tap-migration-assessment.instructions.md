@@ -165,6 +165,21 @@ Transformation needed: [Yes / No — describe if Yes]
 
 ---
 
+## Recommendation
+
+Based on the inventory above, provide a clear recommendation before proceeding to Step 1:
+
+**Go** — All prerequisites met, pipeline is straightforward, no blockers identified.
+**Pending** — Prerequisites met but unresolved questions must be answered before starting.
+**No-go** — One or more prerequisites missing or blockers that require significant work first.
+
+State the recommendation in one line, followed by the single most important reason.
+
+Example:
+> **Recommendation: Go** — pytest project with GitHub Actions already configured; Step 1 can start immediately.
+
+---
+
 ## Migration Report Format
 
 Produce a report at the end of each step:
