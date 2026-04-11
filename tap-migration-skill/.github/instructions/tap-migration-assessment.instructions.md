@@ -1,216 +1,113 @@
 ---
-applyTo: "**/*migration*,**/*assessment*,**/*tap*,**/ASSESSMENT*.md,**/MIGRATION*.md"
+applyTo: "**/*assessment*,**/*tap*,**/ASSESSMENT*.md"
 ---
 
-# TAP Migration Methodology
+# TAP Migration Assessment
 
-When helping with TAP migration, follow this structure. Do not skip phases or jump ahead.
+When helping with TAP migration assessment, follow this structure. Do not skip phases.
+
+**Scope:** Test data and test case migration only. Pipeline migration is out of scope.
 
 ---
 
 ## Prerequisites (Check First)
 
-Before proceeding, confirm ALL of the following:
+Before proceeding, confirm:
 
-- [ ] The project has automated tests (API, UI, performance, or a combination)
-- [ ] The project is already managed with a CI/CD pipeline (Azure DevOps, GitHub Actions, Jenkins, etc.)
-- [ ] The pipeline currently executes the automated tests
+- [ ] The project has automated tests
+- [ ] Test data and/or test cases are locally managed (files, not already in a platform)
 
-**If any prerequisite is NOT met:**
-
-| Missing | Action |
-|---------|--------|
-| No automated tests | Recommend a test strategy conversation first. Do not proceed. |
-| No pipeline | Advise setting up CI/CD pipeline before migration. Do not proceed. |
-| Pipeline exists but doesn't run tests | Fix pipeline test integration first. Do not proceed. |
-
-Only continue when all prerequisites are confirmed.
+If neither condition is met, stop — there is nothing to migrate.
 
 ---
 
-## Phase 1: Project Inventory
+## Phase 1: Automated Scan
 
-Gather the current state before touching anything.
-
-### Automated Scan (run first)
-
-If the project has a `tap-migration/` directory available, run the automated scanner to pre-populate test inventory data:
+If `tap-migration/` is available, run the scanner first:
 
 ```bash
 cd tap-migration && uv run python assess.py --project-dir <path-to-project>
 ```
 
-Use the output to fill in sections 1.2 and 1.3 below. Fill remaining gaps manually.
+The scanner detects:
+- Test framework (pytest / unittest / Robot Framework / Cucumber)
+- Dependency management style
+- Test data files — format and count
+- Test case count
 
-### 1.1 Pipeline Profile
-
-- Pipeline platform (Azure DevOps / GitHub Actions / Jenkins / other)
-- Pipeline trigger conditions (PR, merge, scheduled, manual)
-- Current agent/runner type (cloud-hosted, self-hosted, local machine)
-- Environments covered (dev / staging / prod / etc.)
-- Pipeline config file location (e.g., `azure-pipelines.yml`, `.github/workflows/`)
-
-### 1.2 Test Inventory
-
-| Test Type | Count | Framework/Tool | Location |
-|-----------|-------|----------------|----------|
-| API tests | | | |
-| Web UI tests | | | |
-| App UI tests | | | |
-| Performance tests | | | |
-
-### 1.3 Test Data & Case Management
-
-Identify how test data and test cases are currently managed:
-
-| Item | Current Location | Format | Owner |
-|------|-----------------|--------|-------|
-| Test data | Local files / DB / external tool | CSV / Excel / JSON / YAML / other | |
-| Test cases | Local files / test management tool | Code / Excel / other | |
-| Test configs | | | |
-
-**Output:** One-paragraph summary of current state plus completed tables above.
+Use the output to fill in the inventory below. Fill gaps manually where the scanner cannot detect.
 
 ---
 
-## Step 1: Pipeline Migration
+## Phase 2: Inventory
 
-**Goal:** Connect the existing pipeline to TAP. Test data and test cases remain locally managed and unchanged.
+### Test Cases
 
-### Step 1 Checklist
+| Framework | Count | Location |
+|-----------|-------|----------|
+| | | |
 
-**Environment & Access**
-- [ ] TAP project space created and accessible
-- [ ] Azure DevOps agent pool confirmed (TAP-designated agents)
-- [ ] Agent machine specs verified (sufficient for test types in scope)
-- [ ] Required secrets/environment variables configured in pipeline
+### Test Data
 
-**Pipeline Configuration**
-- [ ] TAP pipeline trigger configured (match current trigger behavior exactly)
-- [ ] Test execution command updated to route through TAP agent
-- [ ] Artifact/report output path configured for TAP
-- [ ] Existing pipeline disabled or redirected (avoid duplicate runs)
+| Format | Count / Volume | Location |
+|--------|---------------|----------|
+| | | |
 
-**Validation**
-- [ ] Dry-run executed on TAP agent
-- [ ] All test types passing with same pass rate as before migration
-- [ ] Pipeline report visible in TAP dashboard
-- [ ] Team notified of new pipeline location
-
-**Step 1 is complete when:** All tests pass on TAP agent with the same results as the previous pipeline.
-
-### Step 1 Risk Checklist
-
-| Risk | Check Before Proceeding |
-|------|------------------------|
-| Agent environment differs from current runner | Compare OS, language runtime, and dependency versions |
-| Secrets not available on TAP agent | Pre-configure all secrets before dry-run |
-| Test results format incompatible with TAP | Confirm TAP-supported report formats with TAP team |
-| Pipeline triggers differ | Match trigger conditions exactly during transition |
+**Flag any of the following:**
+- Test data stored in a database (not files)
+- Test cases defined in an external tool (e.g. Excel, Jira, TestRail)
+- Parameterized tests where data drives the test logic
 
 ---
 
-## Step 2: Test Data & Case Migration (Optional)
+## Phase 3: Compatibility Check
 
-**Goal:** Move locally managed test data and test cases into TAP for centralized management.
+| Dimension | Status | Notes |
+|-----------|--------|-------|
+| Test framework supported by TAP | ✅ / ⚠️ / ❌ | pytest, unittest, Robot Framework, Cucumber |
+| Test data format readable by TAP | ✅ / ⚠️ / ❌ | CSV, JSON, YAML supported; Excel needs conversion |
+| Test data volume manageable | ✅ / ⚠️ / ❌ | Flag if >5000 records |
+| Test cases in migratable format | ✅ / ⚠️ / ❌ | Code-based or file-based; tool-based needs export |
 
-**Only start Step 2 after Step 1 is stable.**
-
-### 2.1 Step 2 Readiness Check
-
-- [ ] Step 1 has been running stably (no regressions, consistent pass rate)
-- [ ] TAP data/case management features confirmed with TAP team:
-  - [ ] Supported upload formats for test data
-  - [ ] Supported formats or import method for test cases/test plans
-- [ ] Team has capacity to validate after migration
-
-### 2.2 Test Data Migration
-
-For each test data source, document:
-
-```
-Source: [file path or system name]
-Format: [CSV / Excel / JSON / YAML / DB / other]
-Volume: [number of records or files]
-TAP-compatible format: [confirm with TAP team]
-Transformation needed: [Yes / No — describe if Yes]
-```
-
-**Steps:**
-- [ ] Export test data from current location
-- [ ] Transform to TAP-compatible format (if needed)
-- [ ] Upload to TAP test data management
-- [ ] Update test execution config to reference TAP data source instead of local
-- [ ] Run tests — verify same results with TAP-managed data
-- [ ] Decommission local test data source (after validation only)
-
-### 2.3 Test Case / Test Plan Migration
-
-For each test case source, document:
-
-```
-Source: [file path or tool name]
-Format: [code / Excel / test management tool / other]
-Count: [number of cases]
-TAP import method: [confirm with TAP team]
-Transformation needed: [Yes / No — describe if Yes]
-```
-
-**Steps:**
-- [ ] Export test cases from current location
-- [ ] Transform to TAP format (if needed)
-- [ ] Import into TAP test plan management
-- [ ] Link test cases to pipeline execution in TAP
-- [ ] Run full test suite — verify coverage and pass rate unchanged
-- [ ] Decommission local test case source (after validation only)
-
-### 2.4 Step 2 Risk Checklist
-
-| Risk | Check Before Proceeding |
-|------|------------------------|
-| Test data format not supported by TAP | Confirm supported formats with TAP team before starting |
-| Data transformation introduces errors | Validate a sample batch before full migration |
-| Test cases lose traceability after import | Map old IDs to new TAP IDs before decommissioning |
-| Coverage drops after migration | Compare test count and pass rate before and after |
+**Status guide:**
+- ✅ Ready — no action needed
+- ⚠️ Needs attention — resolvable before migration
+- ❌ Blocker — must be resolved before proceeding
 
 ---
 
 ## Recommendation
 
-Based on the inventory above, provide a clear recommendation before proceeding to Step 1:
+Give a single clear recommendation:
 
-**Go** — All prerequisites met, pipeline is straightforward, no blockers identified.
-**Pending** — Prerequisites met but unresolved questions must be answered before starting.
-**No-go** — One or more prerequisites missing or blockers that require significant work first.
+**Go** — No blockers, all dimensions ✅ or ⚠️ with clear resolution path.
+**Pending** — One or more ⚠️ items need resolution before migration can start.
+**No-go** — One or more ❌ blockers that require significant work or TAP team input.
 
 State the recommendation in one line, followed by the single most important reason.
 
 Example:
-> **Recommendation: Go** — pytest project with GitHub Actions already configured; Step 1 can start immediately.
+> **Recommendation: Go** — pytest project with 42 test cases and CSV test data; all formats supported by TAP.
 
 ---
 
-## Migration Report Format
-
-Produce a report at the end of each step:
+## Assessment Report Format
 
 ```markdown
-# TAP Migration Report: [Project Name]
+# TAP Migration Assessment: [Project Name]
 Date: [YYYY-MM-DD]
 
 ## Prerequisites
-[Confirmed / Not met — list any blockers]
+[Met / Not met]
 
-## Phase 1: Project Inventory
-[Summary of pipeline, test types, and current data/case management]
+## Inventory
+[Test framework, test case count, test data format and volume]
 
-## Step 1: Pipeline Migration
-Status: [Complete / In Progress / Blocked]
-[Checklist results + dry-run outcome]
+## Compatibility
+[Table with ✅ / ⚠️ / ❌ per dimension]
 
-## Step 2: Data/Case Migration
-Status: [Complete / In Progress / Not Started / N/A]
-[Checklist results + validation outcome]
+## Recommendation
+[Go / Pending / No-go — one line + reason]
 
 ## Open Questions for TAP Team
 [Any unresolved format or capability questions]
@@ -220,8 +117,6 @@ Status: [Complete / In Progress / Not Started / N/A]
 
 ## Rules
 
-- Never start Step 2 before Step 1 is stable.
-- Never decommission local data or cases before validating TAP-managed versions produce the same results.
 - Never assume TAP supports a specific data format — confirm with TAP team first.
-- Never migrate all test types at once — migrate one type at a time to isolate failures.
-- If prerequisites are not met, stop and address them before proceeding.
+- Never proceed to migration without a Go recommendation.
+- If test cases are in an external tool (Jira, TestRail), they must be exported first.
