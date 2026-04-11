@@ -55,10 +55,17 @@ def main(
     # Volume status
     vol_status = _volume_status(scan.test_data_count, small_threshold, medium_threshold)
 
-    # Structure status
-    struct_status = DimensionStatus.OK if dep_mgmt in ("requirements.txt", "pyproject.toml") else DimensionStatus.WARN
+    # Framework status
+    supported_frameworks = {"pytest", "unittest"}
+    warn_frameworks = {"robot_framework", "cucumber"}
+    if framework and framework.lower() in supported_frameworks:
+        framework_status = DimensionStatus.OK
+    elif framework and framework.lower() in warn_frameworks:
+        framework_status = DimensionStatus.WARN
+    else:
+        framework_status = DimensionStatus.ERROR
 
-    # Data format status (basic heuristic)
+    # Data format status
     supported_formats = {"csv", "json", "yaml", "yml"}
     if data_format and data_format.lower() in supported_formats:
         data_fmt_status = DimensionStatus.OK
@@ -70,21 +77,27 @@ def main(
     case_fmt_status = DimensionStatus.OK if scan.test_case_count > 0 else DimensionStatus.WARN
 
     dimensions = {
-        "Test data format": data_fmt_status,
-        "Test case format": case_fmt_status,
-        "Data volume": vol_status,
-        "Project structure": struct_status,
+        "Test framework supported by TAP": framework_status,
+        "Test data format readable by TAP": data_fmt_status,
+        "Test data volume manageable": vol_status,
+        "Test cases in migratable format": case_fmt_status,
     }
 
-    pending = [
-        "TAP supported test data formats: [TBD — confirm with TAP team]",
-        "TAP test case import API: [TBD — confirm with TAP team]",
-    ]
     risks = []
+    if framework_status == DimensionStatus.WARN:
+        risks.append(f"Framework '{framework}' detected — migration tooling in development, confirm with TAP team")
+    if framework_status == DimensionStatus.ERROR:
+        risks.append(f"Framework '{framework}' not recognised — confirm TAP support before proceeding")
     if vol_status == DimensionStatus.ERROR:
         risks.append(f"Large data volume ({scan.test_data_count} records) — plan for batched upload")
     if data_fmt_status == DimensionStatus.WARN:
         risks.append(f"Test data format '{data_format}' requires TAP team confirmation")
+
+    pending = []
+    if framework_status != DimensionStatus.OK:
+        pending.append(f"Confirm TAP support for '{framework}' framework with TAP team")
+    if data_fmt_status == DimensionStatus.WARN:
+        pending.append("Confirm supported test data formats with TAP team")
 
     report = render_feasibility_report(
         project_name=project_dir.name,

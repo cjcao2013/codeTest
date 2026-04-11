@@ -29,13 +29,13 @@ def render_feasibility_report(
 
     if has_error:
         complexity = "🔴 High"
-        recommendation = "❌ Not recommended — resolve blockers first"
+        recommendation = "**No-go** — resolve blockers before proceeding"
     elif warn_count >= 1:
         complexity = "🟡 Medium"
-        recommendation = "⚠️ Resolve the following before proceeding"
+        recommendation = "**Pending** — resolve ⚠️ items before starting migration"
     else:
         complexity = "🟢 Low"
-        recommendation = "✅ Proceed with migration"
+        recommendation = "**Go** — all dimensions clear, migration can start"
 
     dim_rows = "\n".join(
         f"| {name} | {_STATUS_ICON[status]} | |"
