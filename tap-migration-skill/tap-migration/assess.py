@@ -1,0 +1,102 @@
+#!/usr/bin/env python
+"""Phase 1: Scan project, prompt for gaps, output feasibility report."""
+from __future__ import annotations
+from pathlib import Path
+import typer
+from src.scanner import scan_project
+from src.reporter import render_feasibility_report, DimensionStatus
+
+app = typer.Typer()
+
+
+def _parse_volume_threshold(value: str) -> tuple[int, int]:
+    try:
+        parts = dict(kv.split(":") for kv in value.split(","))
+        return int(parts["small"]), int(parts["medium"])
+    except Exception:
+        raise typer.BadParameter("Expected format: small:N,medium:N")
+
+
+def _volume_status(count: int, small: int, medium: int) -> DimensionStatus:
+    if count <= small:
+        return DimensionStatus.OK
+    if count <= medium:
+        return DimensionStatus.WARN
+    return DimensionStatus.ERROR
+
+
+@app.command()
+def main(
+    project_dir: Path = typer.Option(..., help="Path to the local test project"),
+    report_out: Path = typer.Option(Path("./tap-assessment-report.md"), help="Output path for report"),
+    volume_threshold: str = typer.Option("small:500,medium:5000", help="Volume thresholds as small:N,medium:N"),
+) -> None:
+    small_threshold, medium_threshold = _parse_volume_threshold(volume_threshold)
+    scan = scan_project(project_dir)
+
+    # Framework
+    framework = scan.test_framework
+    if not framework:
+        framework = typer.prompt("Test framework not detected. Which framework do you use? (pytest/unittest/other)")
+
+    # Dep management
+    dep_mgmt = scan.dep_management
+    if not dep_mgmt:
+        dep_mgmt = typer.prompt("Dependency management not detected. (requirements.txt/pyproject.toml/other)")
+
+    # Test data format
+    data_format = scan.test_data_format
+    if not data_format:
+        data_format = typer.prompt(
+            "No test data files detected in project dir.\n"
+            "Where is your test data? (local-files/database/external-tool/none)"
+        )
+
+    # Volume status
+    vol_status = _volume_status(scan.test_data_count, small_threshold, medium_threshold)
+
+    # Structure status
+    struct_status = DimensionStatus.OK if dep_mgmt in ("requirements.txt", "pyproject.toml") else DimensionStatus.WARN
+
+    # Data format status (basic heuristic)
+    supported_formats = {"csv", "json", "yaml", "yml"}
+    if data_format and data_format.lower() in supported_formats:
+        data_fmt_status = DimensionStatus.OK
+    elif data_format in ("none", ""):
+        data_fmt_status = DimensionStatus.WARN
+    else:
+        data_fmt_status = DimensionStatus.WARN
+
+    case_fmt_status = DimensionStatus.OK if scan.test_case_count > 0 else DimensionStatus.WARN
+
+    dimensions = {
+        "Test data format": data_fmt_status,
+        "Test case format": case_fmt_status,
+        "Data volume": vol_status,
+        "Project structure": struct_status,
+    }
+
+    pending = [
+        "TAP supported test data formats: [TBD — confirm with TAP team]",
+        "TAP test case import API: [TBD — confirm with TAP team]",
+    ]
+    risks = []
+    if vol_status == DimensionStatus.ERROR:
+        risks.append(f"Large data volume ({scan.test_data_count} records) — plan for batched upload")
+    if data_fmt_status == DimensionStatus.WARN:
+        risks.append(f"Test data format '{data_format}' requires TAP team confirmation")
+
+    report = render_feasibility_report(
+        project_name=project_dir.name,
+        dimensions=dimensions,
+        risk_items=risks,
+        pending_items=pending,
+    )
+
+    report_out.write_text(report)
+    typer.echo(f"Feasibility report written to: {report_out}")
+    typer.echo(report)
+
+
+if __name__ == "__main__":
+    app()
