@@ -32,6 +32,16 @@ Only continue when all prerequisites are confirmed.
 
 Gather the current state before touching anything.
 
+### Automated Scan (run first)
+
+If the project has a `tap-migration/` directory available, run the automated scanner to pre-populate test inventory data:
+
+```bash
+cd tap-migration && uv run python assess.py --project-dir <path-to-project>
+```
+
+Use the output to fill in sections 1.2 and 1.3 below. Fill remaining gaps manually.
+
 ### 1.1 Pipeline Profile
 
 - Pipeline platform (Azure DevOps / GitHub Actions / Jenkins / other)
