@@ -9,6 +9,7 @@ const FIELDS: FieldDef[] = [
   { name: 'project_dir', label: 'Project Directory', type: 'text', required: true, placeholder: '/path/to/project' },
   { name: 'env', label: '.env File Path', type: 'text', required: false, defaultValue: '.env' },
   { name: 'dry_run', label: 'Dry Run (skip upload)', type: 'toggle', required: false, defaultValue: false },
+  { name: 'upload_delay', label: 'Upload Delay (s)', type: 'number', required: false, defaultValue: 0.5 },
   { name: 'report_out', label: 'Report Output Path', type: 'text', required: false, defaultValue: './tap-migration-report.md' },
 ]
 
@@ -28,6 +29,7 @@ export function MigratePage() {
         project_dir: values.project_dir as string,
         env: (values.env as string) || undefined,
         dry_run: values.dry_run as boolean,
+        upload_delay: values.upload_delay as number,
         report_out: (values.report_out as string) || undefined,
       })
       const ws = createWs(`/api/migrate/ws/${run_id}`)

@@ -17,6 +17,7 @@ class MigrateRequest(BaseModel):
     env: str = ".env"
     dry_run: bool = False
     report_out: str = "./tap-migration-report.md"
+    upload_delay: float = 0.0
 
 
 def _find_report_path(buffer: list[str]) -> str | None:
@@ -42,6 +43,8 @@ async def start_migrate(req: MigrateRequest, request: Request):
     ]
     if req.dry_run:
         cmd += ["--dry-run"]
+    if req.upload_delay > 0:
+        cmd += ["--upload-delay", str(req.upload_delay)]
 
     db = request.app.state.db
 
