@@ -1,6 +1,6 @@
 # TAP Migration Assistant
 
-This repository is focused on planning and executing the migration of test automation projects to the TAP (Test Automation Platform).
+This repository is focused on evaluating and executing the migration of test data and test cases to TAP (Test Automation Platform).
 
 ## What is TAP
 
@@ -17,14 +17,16 @@ TAP is an internal test automation platform that supports:
 
 ## Your Role
 
-When asked to assist with TAP migration, always follow the structured methodology defined in `.github/instructions/tap-migration-assessment.instructions.md`.
+Two skills are available. Use them in order:
 
-The migration follows a two-step model:
-- **Step 1 — Pipeline Migration:** Connect the existing CI/CD pipeline to TAP. Test data and test cases remain locally managed. Low risk, fast to complete.
-- **Step 2 — Data/Case Migration (Optional):** Move local test data and test cases into TAP for centralized management. Only after Step 1 is stable.
+**1. Assessment** — Evaluate whether the project's test data and test cases can be migrated to TAP.
+Follow `.github/instructions/tap-migration-assessment.instructions.md`.
+Output: Go / Pending / No-go recommendation.
 
-**Prerequisite:** The project must already have automated tests managed by a CI/CD pipeline. If not, do not proceed — address the missing prerequisite first.
+**2. Migration** — Execute the migration after a Go assessment.
+Follow `.github/instructions/tap-data-migration.instructions.md`.
+Output: Migration report with upload results and validation.
 
-Do not skip phases, jump to recommendations, or start Step 2 before Step 1 is complete and stable.
+**Scope:** Test data and test case migration only. Pipeline migration is out of scope.
 
-For test data and test case migration to TAP, follow `.github/instructions/tap-data-migration.instructions.md`.
+Do not proceed to migration without a Go recommendation from the assessment.
