@@ -5,6 +5,7 @@ from pathlib import Path
 import typer
 from src.scanner import scan_project
 from src.reporter import render_feasibility_report, DimensionStatus
+from src.estimator import estimate_effort
 
 app = typer.Typer()
 
@@ -99,11 +100,18 @@ def main(
     if data_fmt_status == DimensionStatus.WARN:
         pending.append("Confirm supported test data formats with TAP team")
 
+    effort = estimate_effort(
+        framework=framework,
+        test_case_count=scan.test_case_count,
+        data_format=data_format,
+    )
+
     report = render_feasibility_report(
         project_name=project_dir.name,
         dimensions=dimensions,
         risk_items=risks,
         pending_items=pending,
+        effort_summary=effort.summary,
     )
 
     report_out.write_text(report)

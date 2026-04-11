@@ -24,7 +24,7 @@ def test_feasibility_report_nogo_on_error():
         risk_items=["Format not supported"],
         pending_items=[],
     )
-    assert "Not recommended" in report
+    assert "No-go" in report
 
 
 def test_migration_report_contains_summary():

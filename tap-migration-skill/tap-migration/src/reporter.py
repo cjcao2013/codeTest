@@ -23,6 +23,7 @@ def render_feasibility_report(
     dimensions: dict[str, DimensionStatus],
     risk_items: list[str],
     pending_items: list[str],
+    effort_summary: str = "",
 ) -> str:
     has_error = any(s == DimensionStatus.ERROR for s in dimensions.values())
     warn_count = sum(1 for s in dimensions.values() if s == DimensionStatus.WARN)
@@ -43,6 +44,7 @@ def render_feasibility_report(
     )
     risks = "\n".join(f"- {r}" for r in risk_items) or "- None identified"
     pending = "\n".join(f"- [ ] {p}" for p in pending_items) or "- None"
+    effort_summary = effort_summary or "Not calculated"
 
     return f"""# TAP Migration Feasibility Report
 Project: {project_name} | Date: {date.today()}
@@ -55,6 +57,9 @@ Project: {project_name} | Date: {date.today()}
 
 ## Risk Items
 {risks}
+
+## Effort Estimate
+{effort_summary}
 
 ## Recommendation
 {recommendation}
