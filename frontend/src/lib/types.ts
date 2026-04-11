@@ -22,6 +22,7 @@ export interface MigrateConfig {
   env?: string
   dry_run?: boolean
   report_out?: string
+  upload_delay?: number
 }
 
 export type WsMessage =

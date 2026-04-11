@@ -1,4 +1,5 @@
 import pytest
+from unittest.mock import AsyncMock, patch
 from httpx import AsyncClient, ASGITransport
 from main import app
 from services.db import init_db
@@ -79,3 +80,19 @@ async def test_history_contains_run_after_assess(client, tmp_path):
     await asyncio.sleep(0.1)
     runs = (await client.get("/api/history")).json()
     assert any(r["run_id"] == run_id for r in runs)
+
+
+@pytest.mark.asyncio
+async def test_migrate_upload_delay_forwarded_to_cmd(client):
+    """upload_delay is included in the subprocess command args."""
+    with patch("routers.migrate.runner") as mock_runner:
+        mock_runner.start = AsyncMock(return_value="run-delay-01")
+        mock_runner.is_busy = False
+        await client.post("/api/migrate", json={
+            "project_dir": "/tmp/rich",
+            "upload_delay": 0.3,
+        })
+        cmd = mock_runner.start.call_args[0][0]
+        assert "--upload-delay" in cmd
+        idx = cmd.index("--upload-delay")
+        assert cmd[idx + 1] == "0.3"
