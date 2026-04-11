@@ -106,8 +106,15 @@ def main(
         data_format=data_format,
     )
 
+    inventory = {
+        "Test framework": framework or "unknown",
+        "Test cases": str(scan.test_case_count),
+        "Test data": f"{scan.test_data_count} file{'s' if scan.test_data_count != 1 else ''} ({data_format})" if scan.test_data_count else "none detected",
+    }
+
     report = render_feasibility_report(
         project_name=project_dir.name,
+        inventory=inventory,
         dimensions=dimensions,
         risk_items=risks,
         pending_items=pending,
