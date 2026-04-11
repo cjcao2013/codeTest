@@ -85,3 +85,56 @@ def test_detects_nested_test_data(tmp_path):
     (nested / "nested.csv").write_text("id,name\n1,x\n")
     result = scan_project(tmp_path)
     assert result.test_data_count >= 1
+
+
+def test_detects_robot_framework(tmp_path):
+    robot_file = tmp_path / "login.robot"
+    robot_file.write_text("*** Test Cases ***\nLogin Valid\n    Log    ok\n")
+    result = scan_project(tmp_path)
+    assert result.test_framework == "robot_framework"
+
+
+def test_counts_robot_test_cases(tmp_path):
+    robot_file = tmp_path / "checkout.robot"
+    robot_file.write_text(
+        "*** Test Cases ***\n"
+        "Add Item To Cart\n    Log    ok\n\n"
+        "Remove Item From Cart\n    Log    ok\n"
+    )
+    result = scan_project(tmp_path)
+    assert result.test_case_count == 2
+
+
+def test_detects_cucumber_behave(tmp_path):
+    feature_file = tmp_path / "login.feature"
+    feature_file.write_text(
+        "Feature: Login\n\n"
+        "  Scenario: Valid login\n"
+        "    Given a user exists\n"
+        "    When they log in\n"
+        "    Then they see the dashboard\n"
+    )
+    result = scan_project(tmp_path)
+    assert result.test_framework == "cucumber"
+
+
+def test_counts_cucumber_scenarios(tmp_path):
+    feature_file = tmp_path / "checkout.feature"
+    feature_file.write_text(
+        "Feature: Checkout\n\n"
+        "  Scenario: Pay with credit card\n"
+        "    Given items in cart\n\n"
+        "  Scenario: Pay with PayPal\n"
+        "    Given items in cart\n\n"
+        "  Scenario Outline: Pay with <method>\n"
+        "    Given items in cart\n"
+    )
+    result = scan_project(tmp_path)
+    assert result.test_case_count == 3
+
+
+def test_robot_takes_priority_over_pytest(tmp_path):
+    (tmp_path / "pytest.ini").write_text("[pytest]\n")
+    (tmp_path / "test.robot").write_text("*** Test Cases ***\nSome Test\n    Log ok\n")
+    result = scan_project(tmp_path)
+    assert result.test_framework == "robot_framework"

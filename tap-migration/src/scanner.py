@@ -25,6 +25,9 @@ _DATA_EXTENSIONS = {
 }
 
 _TEST_FUNCTION_RE = re.compile(r"^\s*def\s+(test_\w+)\s*\(", re.MULTILINE)
+_ROBOT_TEST_CASE_RE = re.compile(r"^\*{3}\s*Test Cases\s*\*{3}", re.MULTILINE)
+_ROBOT_TEST_NAME_RE = re.compile(r"^(\S[^\n]+)$", re.MULTILINE)
+_CUCUMBER_SCENARIO_RE = re.compile(r"^\s*Scenario(?:\s+Outline)?:", re.MULTILINE)
 
 
 def scan_project(project_dir: Path) -> ScanResult:
@@ -37,6 +40,14 @@ def scan_project(project_dir: Path) -> ScanResult:
 
 
 def _detect_framework(root: Path, result: ScanResult) -> None:
+    robot_files = list(root.rglob("*.robot"))
+    if robot_files:
+        result.test_framework = "robot_framework"
+        return
+    feature_files = list(root.rglob("*.feature"))
+    if feature_files:
+        result.test_framework = "cucumber"
+        return
     if (root / "pytest.ini").exists():
         result.test_framework = "pytest"
         return
@@ -81,6 +92,23 @@ def _detect_test_data(root: Path, result: ScanResult) -> None:
 
 
 def _count_test_cases(root: Path, result: ScanResult) -> None:
+    robot_files = list(root.rglob("*.robot"))
+    if robot_files:
+        result.test_case_paths = robot_files
+        result.test_case_count = sum(
+            _count_robot_cases(f) for f in robot_files
+        )
+        return
+
+    feature_files = list(root.rglob("*.feature"))
+    if feature_files:
+        result.test_case_paths = feature_files
+        result.test_case_count = sum(
+            len(_CUCUMBER_SCENARIO_RE.findall(f.read_text()))
+            for f in feature_files
+        )
+        return
+
     test_files = [
         f for f in root.rglob("*.py")
         if f.name.startswith("test_") or f.name.endswith("_test.py")
@@ -90,3 +118,21 @@ def _count_test_cases(root: Path, result: ScanResult) -> None:
         len(_TEST_FUNCTION_RE.findall(f.read_text()))
         for f in test_files
     )
+
+
+def _count_robot_cases(robot_file: Path) -> int:
+    """Count test case names in a .robot file (lines starting non-whitespace inside a Test Cases block)."""
+    text = robot_file.read_text()
+    in_test_cases = False
+    count = 0
+    for line in text.splitlines():
+        stripped = line.strip()
+        if re.match(r"^\*{3}\s*Test Cases\s*\*{3}", line):
+            in_test_cases = True
+            continue
+        if re.match(r"^\*{3}", line):
+            in_test_cases = False
+            continue
+        if in_test_cases and stripped and not line.startswith(" ") and not line.startswith("\t"):
+            count += 1
+    return count
