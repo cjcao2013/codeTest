@@ -1,4 +1,3 @@
-根据
 C:\Users\232030\code\GO_OMNE\QRace_Replacement\omne-qa-mob-th\output\robot-reports\output.xml，为什么出现下面这个定位问题，从截图看到 明明弹出 Enter your pin 页面了，为什么没有进入 “Set or enter PIN” 这个key word? 根本原因是什么？
 
 
@@ -20,5 +19,4 @@ robot `
 PS C:\Users\232030\code\GO_OMNE\QRace_Replacement\omne-qa-mob-th>
 
 我直接改了，然额还是不行，
-根据C:\Users\232030\code\GO_OMNE\QRace_Replacement\omne-qa-mob-th\TestData\TestCases.xlsx, 只运行了TC_03_Ins_TH_Android_ViewPolicy_001，。。。 从截图 C:\Users\232030\code\GO_OMNE\QRace_Replacement\omne-qa-mob-th\output\TC_03_Ins_TH_Android_ViewPolicy_001\00010_OMNE_PostSignInHome_Page.png,
-是这里要求输入 PIN ,请你根据 C:\Users\232030\code\GO_OMNE\QRace_Replacement\omne-qa-mob-th\output\robot-reports\output.xml， 分析为什么卡在这里了？ 根因是什么？要怎样修改
+根据C:\Users\232030\code\GO_OMNE\QRace_Replacement\omne-qa-mob-th\TestData\TestCases.xlsx, 只运行了TC_03_Ins_TH_Android_ViewPolicy_001，。。。 ,，我看到的页面是页面叫 “Enter your pin” 请你根据 C:\Users\232030\code\GO_OMNE\QRace_Replacement\omne-qa-mob-th\output\robot-reports\output.xml， 分析为什么卡在这里了？ 根因是什么？要怎样修改
